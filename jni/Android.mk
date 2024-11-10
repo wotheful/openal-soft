@@ -74,7 +74,7 @@ LOCAL_SRC_FILES := \
 LOCAL_CFLAGS := -fPIC -DPIC -fexceptions -DANDROID -pipe -integrated-as -fno-plt -O3 -flto=thin -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-invariant-load-hoisting -mllvm -polly-run-inliner -mllvm -polly-run-dce -flto=thin -fwhole-program-vtables
 LOCAL_CXXLAGS := -fPIC -DPIC -fno-exceptions -DANDROID -pipe -integrated-as -fno-plt -O3 -flto=thin -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-invariant-load-hoisting -mllvm -polly-run-inliner -mllvm -polly-run-dce -flto=thin -fwhole-program-vtables
 LOCAL_CPPLAGS := -fPIC -DPIC -fno-exceptions -DANDROID -pipe -integrated-as -fno-plt -O3 -flto=thin -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-invariant-load-hoisting -mllvm -polly-run-inliner -mllvm -polly-run-dce -flto=thin -fwhole-program-vtables
-LOCAL_LDLIBS := -fuse-ld=lld -flto=thin -llog -lOpenSLES
+LOCAL_LDLIBS := -fuse-ld=lld -flto=thin -llog -lOpenSLES -lc++
 LOCAL_C_INCLUDES := $(LOCAL_PATH)/include $(LOCAL_PATH)/include/AL $(LOCAL_PATH)/al $(LOCAL_PATH)/alc $(LOCAL_PATH)/common $(LOCAL_PATH)/core
 LOCAL_EXPORT_C_INCLUDES := $(LOCAL_PATH)/include
 
