@@ -50,9 +50,9 @@ LOCAL_SRC_FILES := \
     alc/effects/pshifter.cpp \
     alc/effects/reverb.cpp \
     alc/effects/vmorpher.cpp \
-    alc/filters/biquad.cpp \
-    alc/filters/nfc.cpp \
-    alc/filters/splitter.cpp \
+    core/filters/biquad.cpp \
+    core/filters/nfc.cpp \
+    core/filters/splitter.cpp \
     alc/fmt_traits.cpp \
     alc/fpu_ctrl.cpp \
     alc/helpers.cpp \
@@ -63,7 +63,7 @@ LOCAL_SRC_FILES := \
     alc/uhjfilter.cpp \
     alc/uiddefs.cpp \
     alc/voice.cpp \
-    alc/mixer/mixer_c.cpp \
+    core/mixer/mixer_c.cpp \
     alc/backends/base.cpp \
     alc/backends/loopback.cpp \
     alc/backends/null.cpp \
@@ -71,11 +71,11 @@ LOCAL_SRC_FILES := \
     alc/backends/opensl.cpp
 #   alc/mixer/mixer_neon.cpp.neon \
     
-LOCAL_CFLAGS := -std=c17 -fPIC -DPIC -fexceptions -DANDROID -pipe -integrated-as -fno-plt -O3 -flto=thin -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-invariant-load-hoisting -mllvm -polly-run-inliner -mllvm -polly-run-dce -flto=thin -fwhole-program-vtables
-LOCAL_CXXLAGS := -std=c++17 -fPIC -DPIC -fexceptions -DANDROID -pipe -integrated-as -fno-plt -O3 -flto=thin -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-invariant-load-hoisting -mllvm -polly-run-inliner -mllvm -polly-run-dce -flto=thin -fwhole-program-vtables
-LOCAL_CPPLAGS := -std=c++17 -fPIC -DPIC -fexceptions -DANDROID -pipe -integrated-as -fno-plt -O3 -flto=thin -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-invariant-load-hoisting -mllvm -polly-run-inliner -mllvm -polly-run-dce -flto=thin -fwhole-program-vtables
+LOCAL_CFLAGS := -std=c23 -fPIC -DPIC -fexceptions -DANDROID -pipe -integrated-as -fno-plt -O3 -flto=thin -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-invariant-load-hoisting -mllvm -polly-run-inliner -mllvm -polly-run-dce -flto=thin -fwhole-program-vtables
+LOCAL_CXXLAGS := -std=c++23 -fPIC -DPIC -fexceptions -DANDROID -pipe -integrated-as -fno-plt -O3 -flto=thin -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-invariant-load-hoisting -mllvm -polly-run-inliner -mllvm -polly-run-dce -flto=thin -fwhole-program-vtables
+LOCAL_CPPLAGS := -std=c++23 -fPIC -DPIC -fexceptions -DANDROID -pipe -integrated-as -fno-plt -O3 -flto=thin -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-invariant-load-hoisting -mllvm -polly-run-inliner -mllvm -polly-run-dce -flto=thin -fwhole-program-vtables
 LOCAL_LDLIBS := -fuse-ld=lld -flto=thin -llog -lOpenSLES
-LOCAL_C_INCLUDES := $(LOCAL_PATH)/include $(LOCAL_PATH)/include/AL $(LOCAL_PATH)/alc $(LOCAL_PATH)/common
+LOCAL_C_INCLUDES := $(LOCAL_PATH)/include $(LOCAL_PATH)/include/AL $(LOCAL_PATH)/al $(LOCAL_PATH)/alc $(LOCAL_PATH)/common $(LOCAL_PATH)/core
 LOCAL_EXPORT_C_INCLUDES := $(LOCAL_PATH)/include
 
 include $(BUILD_SHARED_LIBRARY)
