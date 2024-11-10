@@ -2,9 +2,8 @@ LOCAL_PATH := $(call my-dir)/..
 
 include $(CLEAR_VARS)
 
-LOCAL_CPP_EXTENSION := .cpp .cc
+LOCAL_CPP_EXTENSION := .cpp
 LOCAL_MODULE    := openal
-# LOCAL_CFLAGS := -DCPU_EXTS=Default -DHAVE_OPENSL=1
 LOCAL_SRC_FILES := \
     common/alcomplex.cpp \
     common/alassert.cpp \
@@ -50,9 +49,6 @@ LOCAL_SRC_FILES := \
     alc/effects/pshifter.cpp \
     alc/effects/reverb.cpp \
     alc/effects/vmorpher.cpp \
-    core/filters/biquad.cpp \
-    core/filters/nfc.cpp \
-    core/filters/splitter.cpp \
     alc/fmt_traits.cpp \
     alc/fpu_ctrl.cpp \
     alc/helpers.cpp \
@@ -63,7 +59,6 @@ LOCAL_SRC_FILES := \
     alc/uhjfilter.cpp \
     alc/uiddefs.cpp \
     alc/voice.cpp \
-    core/mixer/mixer_c.cpp \
     alc/backends/base.cpp \
     alc/backends/loopback.cpp \
     alc/backends/null.cpp \
@@ -71,10 +66,10 @@ LOCAL_SRC_FILES := \
     alc/backends/opensl.cpp
 #   alc/mixer/mixer_neon.cpp.neon \
     
-LOCAL_CFLAGS := -fPIC -DPIC -fexceptions -DANDROID -pipe -integrated-as -fno-plt -O3 -flto=thin -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-invariant-load-hoisting -mllvm -polly-run-inliner -mllvm -polly-run-dce -flto=thin -fwhole-program-vtables
+LOCAL_CFLAGS := -fPIC -DPIC -fno-exceptions -DANDROID -pipe -integrated-as -fno-plt -O3 -flto=thin -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-invariant-load-hoisting -mllvm -polly-run-inliner -mllvm -polly-run-dce -flto=thin -fwhole-program-vtables
 LOCAL_CXXLAGS := -fPIC -DPIC -fno-exceptions -DANDROID -pipe -integrated-as -fno-plt -O3 -flto=thin -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-invariant-load-hoisting -mllvm -polly-run-inliner -mllvm -polly-run-dce -flto=thin -fwhole-program-vtables
 LOCAL_CPPLAGS := -fPIC -DPIC -fno-exceptions -DANDROID -pipe -integrated-as -fno-plt -O3 -flto=thin -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-invariant-load-hoisting -mllvm -polly-run-inliner -mllvm -polly-run-dce -flto=thin -fwhole-program-vtables
-LOCAL_LDLIBS := -fuse-ld=lld -flto=thin -llog -lOpenSLES -lc++
+LOCAL_LDLIBS := -fuse-ld=lld -flto=thin -lOpenSLES
 LOCAL_C_INCLUDES := $(LOCAL_PATH)/include $(LOCAL_PATH)/include/AL $(LOCAL_PATH)/al $(LOCAL_PATH)/alc $(LOCAL_PATH)/common $(LOCAL_PATH)/core
 LOCAL_EXPORT_C_INCLUDES := $(LOCAL_PATH)/include
 
