@@ -3,26 +3,18 @@
 
 #include "base.h"
 
-#include <algorithm>
 #include <array>
 #include <atomic>
+#include <utility>
 
 #include "core/devformat.h"
 
 
 namespace al {
+auto backend_exception::make_string(fmt::string_view fmt, fmt::format_args args) -> std::string
+{ return fmt::vformat(fmt, std::move(args)); }
 
-backend_exception::backend_exception(backend_error code, const char *msg, ...) : mErrorCode{code}
-{
-    /* NOLINTBEGIN(*-array-to-pointer-decay) */
-    std::va_list args;
-    va_start(args, msg);
-    setMessage(msg, args);
-    va_end(args);
-    /* NOLINTEND(*-array-to-pointer-decay) */
-}
 backend_exception::~backend_exception() = default;
-
 } // namespace al
 
 

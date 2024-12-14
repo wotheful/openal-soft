@@ -39,12 +39,9 @@
 #include "alc/alconfig.h"
 #include "almalloc.h"
 #include "alnumeric.h"
-#include "alstring.h"
 #include "althrd_setname.h"
 #include "core/device.h"
-#include "core/helpers.h"
 #include "core/logging.h"
-#include "opthelpers.h"
 #include "strutils.h"
 
 
@@ -173,7 +170,7 @@ int WaveBackend::mixerProc()
             const size_t fs{fwrite(mBuffer.data(), frameSize, mDevice->UpdateSize, mFile.get())};
             if(fs < mDevice->UpdateSize || ferror(mFile.get()))
             {
-                ERR("Error writing to file\n");
+                ERR("Error writing to file");
                 mDevice->handleDisconnect("Failed to write playback samples");
                 break;
             }
@@ -204,8 +201,8 @@ void WaveBackend::open(std::string_view name)
     if(name.empty())
         name = GetDeviceName();
     else if(name != GetDeviceName())
-        throw al::backend_exception{al::backend_error::NoDevice, "Device name \"%.*s\" not found",
-            al::sizei(name), name.data()};
+        throw al::backend_exception{al::backend_error::NoDevice, "Device name \"{}\" not found",
+            name};
 
     /* There's only one "device", so if it's already open, we're done. */
     if(mFile) return;
@@ -219,8 +216,8 @@ void WaveBackend::open(std::string_view name)
     mFile = FilePtr{fopen(fname->c_str(), "wb")};
 #endif
     if(!mFile)
-        throw al::backend_exception{al::backend_error::DeviceError, "Could not open file '%s': %s",
-            fname->c_str(), std::generic_category().message(errno).c_str()};
+        throw al::backend_exception{al::backend_error::DeviceError, "Could not open file '{}': {}",
+            *fname, std::generic_category().message(errno)};
 
     mDeviceName = name;
 }
@@ -288,8 +285,8 @@ bool WaveBackend::reset()
     rewind(mFile.get());
     if(auto errcode = errno; errno != 0 && errno != ENOENT)
     {
-        ERR("Failed to reset file offset: %s (%d)\n",
-            std::generic_category().message(errcode).c_str(), errcode);
+        ERR("Failed to reset file offset: {} ({})", std::generic_category().message(errcode),
+            errcode);
     }
 
     fputs("RIFF", mFile.get());
@@ -328,7 +325,7 @@ bool WaveBackend::reset()
 
     if(ferror(mFile.get()))
     {
-        ERR("Error writing header: %s\n", std::generic_category().message(errno).c_str());
+        ERR("Error writing header: {}", std::generic_category().message(errno));
         return false;
     }
     mDataStart = ftell(mFile.get());
@@ -344,14 +341,14 @@ bool WaveBackend::reset()
 void WaveBackend::start()
 {
     if(mDataStart > 0 && fseek(mFile.get(), 0, SEEK_END) != 0)
-        WARN("Failed to seek on output file\n");
+        WARN("Failed to seek on output file");
     try {
         mKillNow.store(false, std::memory_order_release);
         mThread = std::thread{std::mem_fn(&WaveBackend::mixerProc), this};
     }
     catch(std::exception& e) {
         throw al::backend_exception{al::backend_error::DeviceError,
-            "Failed to start mixing thread: %s", e.what()};
+            "Failed to start mixing thread: {}", e.what()};
     }
 }
 

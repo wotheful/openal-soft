@@ -1,5 +1,6 @@
 
 #include "config.h"
+#include "config_simd.h"
 
 #include "voice.h"
 
@@ -42,10 +43,10 @@
 #include "voice_change.h"
 
 struct CTag;
-#ifdef HAVE_SSE
+#if HAVE_SSE
 struct SSETag;
 #endif
-#ifdef HAVE_NEON
+#if HAVE_NEON
 struct NEONTag;
 #endif
 
@@ -75,11 +76,11 @@ HrtfMixerBlendFunc MixHrtfBlendSamples{MixHrtfBlend_<CTag>};
 
 inline MixerOutFunc SelectMixer()
 {
-#ifdef HAVE_NEON
+#if HAVE_NEON
     if((CPUCapFlags&CPU_CAP_NEON))
         return Mix_<NEONTag>;
 #endif
-#ifdef HAVE_SSE
+#if HAVE_SSE
     if((CPUCapFlags&CPU_CAP_SSE))
         return Mix_<SSETag>;
 #endif
@@ -88,11 +89,11 @@ inline MixerOutFunc SelectMixer()
 
 inline MixerOneFunc SelectMixerOne()
 {
-#ifdef HAVE_NEON
+#if HAVE_NEON
     if((CPUCapFlags&CPU_CAP_NEON))
         return Mix_<NEONTag>;
 #endif
-#ifdef HAVE_SSE
+#if HAVE_SSE
     if((CPUCapFlags&CPU_CAP_SSE))
         return Mix_<SSETag>;
 #endif
@@ -101,11 +102,11 @@ inline MixerOneFunc SelectMixerOne()
 
 inline HrtfMixerFunc SelectHrtfMixer()
 {
-#ifdef HAVE_NEON
+#if HAVE_NEON
     if((CPUCapFlags&CPU_CAP_NEON))
         return MixHrtf_<NEONTag>;
 #endif
-#ifdef HAVE_SSE
+#if HAVE_SSE
     if((CPUCapFlags&CPU_CAP_SSE))
         return MixHrtf_<SSETag>;
 #endif
@@ -114,11 +115,11 @@ inline HrtfMixerFunc SelectHrtfMixer()
 
 inline HrtfMixerBlendFunc SelectHrtfBlendMixer()
 {
-#ifdef HAVE_NEON
+#if HAVE_NEON
     if((CPUCapFlags&CPU_CAP_NEON))
         return MixHrtfBlend_<NEONTag>;
 #endif
-#ifdef HAVE_SSE
+#if HAVE_SSE
     if((CPUCapFlags&CPU_CAP_SSE))
         return MixHrtfBlend_<SSETag>;
 #endif
@@ -151,18 +152,18 @@ void Voice::InitMixer(std::optional<std::string> resopt)
 		
         if (al::case_compare(resampler, "cubic"sv) == 0)
         {
-            WARN("Resampler option \"%s\" is deprecated, using spline\n", resopt->c_str());
+            WARN("Resampler option \"{}\" is deprecated, using spline", *resopt);
             resampler = "spline"sv;
         }
         else if(al::case_compare(resampler, "sinc4"sv) == 0
             || al::case_compare(resampler, "sinc8"sv) == 0)
         {
-            WARN("Resampler option \"%s\" is deprecated, using gaussian\n", resopt->c_str());
+            WARN("Resampler option \"{}\" is deprecated, using gaussian", *resopt);
             resampler = "gaussian"sv;
         }
         else if(al::case_compare(resampler, "bsinc"sv) == 0)
         {
-            WARN("Resampler option \"%s\" is deprecated, using bsinc12\n", resopt->c_str());
+            WARN("Resampler option \"{}\" is deprecated, using bsinc12", *resopt);
             resampler = "bsinc12"sv;
         }
 
@@ -170,7 +171,7 @@ void Voice::InitMixer(std::optional<std::string> resopt)
             [resampler](const ResamplerEntry &entry) -> bool
             { return al::case_compare(resampler, entry.name) == 0; });
         if(iter == ResamplerList.end())
-            ERR("Invalid resampler: %s\n", resopt->c_str());
+            ERR("Invalid resampler: {}", *resopt);
         else
             ResamplerDefault = iter->resampler;
     }
@@ -1212,7 +1213,7 @@ void Voice::prepare(DeviceBase *device)
         : ChannelsFromFmt(mFmtChannels, std::min(mAmbiOrder, device->mAmbiOrder))};
     if(num_channels > device->MixerChannelsMax) UNLIKELY
     {
-        ERR("Unexpected channel count: %u (limit: %zu, %s : %d)\n", num_channels,
+        ERR("Unexpected channel count: {} (limit: {}, {} : {})", num_channels,
             device->MixerChannelsMax, NameFromFormat(mFmtChannels), mAmbiOrder);
         num_channels = device->MixerChannelsMax;
     }

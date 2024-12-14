@@ -19,6 +19,7 @@
  */
 
 #include "config.h"
+#include "config_simd.h"
 
 #include "alu.h"
 
@@ -26,23 +27,25 @@
 #include <array>
 #include <atomic>
 #include <cassert>
-#include <chrono>
-#include <climits>
+#include <cmath>
 #include <cstdarg>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <functional>
 #include <iterator>
 #include <limits>
 #include <memory>
-#include <new>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <utility>
+#include <variant>
 
 #include "almalloc.h"
 #include "alnumbers.h"
 #include "alnumeric.h"
+#include "alsem.h"
 #include "alspan.h"
 #include "alstring.h"
 #include "atomic.h"
@@ -70,6 +73,7 @@
 #include "core/mixer/defs.h"
 #include "core/mixer/hrtfdefs.h"
 #include "core/resampler_limits.h"
+#include "core/storage_formats.h"
 #include "core/uhjfilter.h"
 #include "core/voice.h"
 #include "core/voice_change.h"
@@ -78,19 +82,18 @@
 #include "ringbuffer.h"
 #include "strutils.h"
 #include "vecmat.h"
-#include "vector.h"
 
 struct CTag;
-#ifdef HAVE_SSE
+#if HAVE_SSE
 struct SSETag;
 #endif
-#ifdef HAVE_SSE2
+#if HAVE_SSE2
 struct SSE2Tag;
 #endif
-#ifdef HAVE_SSE4_1
+#if HAVE_SSE4_1
 struct SSE4Tag;
 #endif
-#ifdef HAVE_NEON
+#if HAVE_NEON
 struct NEONTag;
 #endif
 struct PointTag;
@@ -143,11 +146,11 @@ HrtfDirectMixerFunc MixDirectHrtf{MixDirectHrtf_<CTag>};
 
 inline HrtfDirectMixerFunc SelectHrtfMixer()
 {
-#ifdef HAVE_NEON
+#if HAVE_NEON
     if((CPUCapFlags&CPU_CAP_NEON))
         return MixDirectHrtf_<NEONTag>;
 #endif
-#ifdef HAVE_SSE
+#if HAVE_SSE
     if((CPUCapFlags&CPU_CAP_SSE))
         return MixDirectHrtf_<SSETag>;
 #endif
@@ -186,34 +189,34 @@ inline ResamplerFunc SelectResampler(Resampler resampler, uint increment)
     case Resampler::Point:
         return Resample_<PointTag,CTag>;
     case Resampler::Linear:
-#ifdef HAVE_NEON
+#if HAVE_NEON
         if((CPUCapFlags&CPU_CAP_NEON))
             return Resample_<LerpTag,NEONTag>;
 #endif
-#ifdef HAVE_SSE4_1
+#if HAVE_SSE4_1
         if((CPUCapFlags&CPU_CAP_SSE4_1))
             return Resample_<LerpTag,SSE4Tag>;
 #endif
-#ifdef HAVE_SSE2
+#if HAVE_SSE2
         if((CPUCapFlags&CPU_CAP_SSE2))
             return Resample_<LerpTag,SSE2Tag>;
 #endif
         return Resample_<LerpTag,CTag>;
     case Resampler::Spline:
     case Resampler::Gaussian:
-#ifdef HAVE_NEON
+#if HAVE_NEON
         if((CPUCapFlags&CPU_CAP_NEON))
             return Resample_<CubicTag,NEONTag>;
 #endif
-#ifdef HAVE_SSE4_1
+#if HAVE_SSE4_1
         if((CPUCapFlags&CPU_CAP_SSE4_1))
             return Resample_<CubicTag,SSE4Tag>;
 #endif
-#ifdef HAVE_SSE2
+#if HAVE_SSE2
         if((CPUCapFlags&CPU_CAP_SSE2))
             return Resample_<CubicTag,SSE2Tag>;
 #endif
-#ifdef HAVE_SSE
+#if HAVE_SSE
         if((CPUCapFlags&CPU_CAP_SSE))
             return Resample_<CubicTag,SSETag>;
 #endif
@@ -222,11 +225,11 @@ inline ResamplerFunc SelectResampler(Resampler resampler, uint increment)
     case Resampler::BSinc24:
         if(increment > MixerFracOne)
         {
-#ifdef HAVE_NEON
+#if HAVE_NEON
             if((CPUCapFlags&CPU_CAP_NEON))
                 return Resample_<BSincTag,NEONTag>;
 #endif
-#ifdef HAVE_SSE
+#if HAVE_SSE
             if((CPUCapFlags&CPU_CAP_SSE))
                 return Resample_<BSincTag,SSETag>;
 #endif
@@ -235,11 +238,11 @@ inline ResamplerFunc SelectResampler(Resampler resampler, uint increment)
         /* fall-through */
     case Resampler::FastBSinc12:
     case Resampler::FastBSinc24:
-#ifdef HAVE_NEON
+#if HAVE_NEON
         if((CPUCapFlags&CPU_CAP_NEON))
             return Resample_<FastBSincTag,NEONTag>;
 #endif
-#ifdef HAVE_SSE
+#if HAVE_SSE
         if((CPUCapFlags&CPU_CAP_SSE))
             return Resample_<FastBSincTag,SSETag>;
 #endif
@@ -435,7 +438,7 @@ bool CalcContextParams(ContextBase *ctx)
 
     ctx->mParams.Gain = props->Gain * ctx->mGainBoost;
     ctx->mParams.MetersPerUnit = props->MetersPerUnit
-#ifdef ALSOFT_EAX
+#if ALSOFT_EAX
         * props->DistanceFactor
 #endif
         ;
@@ -443,7 +446,7 @@ bool CalcContextParams(ContextBase *ctx)
 
     ctx->mParams.DopplerFactor = props->DopplerFactor;
     ctx->mParams.SpeedOfSound = props->SpeedOfSound * props->DopplerVelocity
-#ifdef ALSOFT_EAX
+#if ALSOFT_EAX
         / props->DistanceFactor
 #endif
         ;
@@ -1954,9 +1957,7 @@ void ProcessContexts(DeviceBase *device, const uint SamplesToDo)
 {
     ASSUME(SamplesToDo > 0);
 
-    const nanoseconds curtime{device->mClockBase.load(std::memory_order_relaxed) +
-        nanoseconds{seconds{device->mSamplesDone.load(std::memory_order_relaxed)}}/
-        device->Frequency};
+    const auto curtime = device->getClockTime();
 
     auto proc_context = [SamplesToDo,curtime](ContextBase *ctx)
     {
@@ -2141,8 +2142,9 @@ void Write(const al::span<const FloatBufferLine> InBuffer, void *OutBuffer, cons
     ASSUME(FrameStep > 0);
     ASSUME(SamplesToDo > 0);
 
-    const auto output = al::span{static_cast<T*>(OutBuffer), (Offset+SamplesToDo)*FrameStep}
-        .subspan(Offset*FrameStep);
+    /* Some Clang versions don't like calling subspan on an rvalue here. */
+    const auto output_ = al::span{static_cast<T*>(OutBuffer), (Offset+SamplesToDo)*FrameStep};
+    const auto output = output_.subspan(Offset*FrameStep);
     size_t c{0};
     for(const FloatBufferLine &inbuf : InBuffer)
     {
@@ -2173,7 +2175,9 @@ void Write(const al::span<const FloatBufferLine> InBuffer, al::span<void*> OutBu
     for(auto *dstbuf : OutBuffers)
     {
         const auto src = al::span{*srcbuf}.first(SamplesToDo);
-        const auto dst = al::span{static_cast<T*>(dstbuf), Offset+SamplesToDo}.subspan(Offset);
+        /* Some Clang versions don't like calling subspan on an rvalue here. */
+        const auto dst_ = al::span{static_cast<T*>(dstbuf), Offset+SamplesToDo};
+        const auto dst = dst_.subspan(Offset);
         std::transform(src.cbegin(), src.end(), dst.begin(), SampleConv<T>);
         ++srcbuf;
     }
@@ -2200,10 +2204,10 @@ uint DeviceBase::renderSamples(const uint numSamples)
          * also guarantees a stable conversion.
          */
         auto samplesDone = mSamplesDone.load(std::memory_order_relaxed) + samplesToDo;
-        auto clockBase = mClockBase.load(std::memory_order_relaxed) +
-            std::chrono::seconds{samplesDone/Frequency};
+        auto clockBaseSec = mClockBaseSec.load(std::memory_order_relaxed) +
+            seconds32{samplesDone/Frequency};
         mSamplesDone.store(samplesDone%Frequency, std::memory_order_relaxed);
-        mClockBase.store(clockBase, std::memory_order_relaxed);
+        mClockBaseSec.store(clockBaseSec, std::memory_order_relaxed);
     }
 
     /* Apply any needed post-process for finalizing the Dry mix to the RealOut
@@ -2285,7 +2289,7 @@ void DeviceBase::renderSamples(void *outBuffer, const uint numSamples, const siz
     }
 }
 
-void DeviceBase::handleDisconnect(const char *msg, ...)
+void DeviceBase::doDisconnect(std::string msg)
 {
     const auto mixLock = getWriteMixLock();
 
@@ -2293,24 +2297,7 @@ void DeviceBase::handleDisconnect(const char *msg, ...)
     {
         AsyncEvent evt{std::in_place_type<AsyncDisconnectEvent>};
         auto &disconnect = std::get<AsyncDisconnectEvent>(evt);
-
-        /* NOLINTBEGIN(*-array-to-pointer-decay) */
-        va_list args, args2;
-        va_start(args, msg);
-        va_copy(args2, args);
-        if(int msglen{vsnprintf(nullptr, 0, msg, args)}; msglen > 0)
-        {
-            disconnect.msg.resize(static_cast<uint>(msglen)+1_uz);
-            vsnprintf(disconnect.msg.data(), disconnect.msg.size(), msg, args2);
-        }
-        else
-            disconnect.msg = "<failed constructing message>";
-        va_end(args2);
-        va_end(args);
-        /* NOLINTEND(*-array-to-pointer-decay) */
-
-        while(!disconnect.msg.empty() && disconnect.msg.back() == '\0')
-            disconnect.msg.pop_back();
+        disconnect.msg = std::move(msg);
 
         for(ContextBase *ctx : *mContexts.load())
         {

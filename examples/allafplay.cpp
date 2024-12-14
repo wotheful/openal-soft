@@ -79,7 +79,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
-#include <iostream>
 #include <memory>
 #include <numeric>
 #include <string>
@@ -98,6 +97,7 @@
 #include "alspan.h"
 #include "alstring.h"
 #include "common/alhelpers.h"
+#include "fmt/core.h"
 
 #include "win_main_utf8.h"
 
@@ -154,13 +154,7 @@ using namespace std::string_view_literals;
 [[noreturn]]
 void do_assert(const char *message, int linenum, const char *filename, const char *funcname)
 {
-    auto errstr = std::string{filename};
-    errstr += ':';
-    errstr += std::to_string(linenum);
-    errstr += ": ";
-    errstr += funcname;
-    errstr += ": ";
-    errstr += message;
+    auto errstr = fmt::format("{}:{}: {}: {}", filename, linenum, funcname, message);
     throw std::runtime_error{errstr};
 }
 
@@ -330,7 +324,7 @@ struct Channel {
 };
 
 struct LafStream {
-    std::ifstream mInFile;
+    std::filebuf mInFile;
 
     Quality mQuality{};
     Mode mMode{};
@@ -374,7 +368,8 @@ struct LafStream {
 auto LafStream::readChunk() -> uint32_t
 {
     mEnabledTracks.fill(0);
-    mInFile.read(reinterpret_cast<char*>(mEnabledTracks.data()), (mNumTracks+7_z)>>3);
+
+    mInFile.sgetn(reinterpret_cast<char*>(mEnabledTracks.data()), (mNumTracks+7_z)>>3);
     mNumEnabled = std::accumulate(mEnabledTracks.cbegin(), mEnabledTracks.cend(), 0u,
         [](const unsigned int val, const uint8_t in)
         { return val + unsigned(al::popcount(unsigned(in))); });
@@ -390,8 +385,7 @@ auto LafStream::readChunk() -> uint32_t
     const auto numsamples = std::min(uint64_t{mSampleRate}, mSampleCount-mCurrentSample);
 
     const auto toread = std::streamsize(numsamples * BytesFromQuality(mQuality) * mNumEnabled);
-    mInFile.read(mSampleChunk.data(), toread);
-    if(mInFile.gcount() != toread)
+    if(mInFile.sgetn(mSampleChunk.data(), toread) != toread)
         throw std::runtime_error{"Failed to read sample chunk"};
 
     std::fill(mSampleChunk.begin()+toread, mSampleChunk.end(), char{});
@@ -514,18 +508,17 @@ auto LafStream::prepareTrack(const size_t trackidx, const size_t count) -> al::s
 auto LoadLAF(const fs::path &fname) -> std::unique_ptr<LafStream>
 {
     auto laf = std::make_unique<LafStream>();
-    laf->mInFile.open(fname, std::ios_base::binary);
+    if(!laf->mInFile.open(fname, std::ios_base::binary | std::ios_base::in))
+        throw std::runtime_error{"Could not open file"};
 
     auto marker = std::array<char,9>{};
-    laf->mInFile.read(marker.data(), marker.size());
-    if(laf->mInFile.gcount() != marker.size())
+    if(laf->mInFile.sgetn(marker.data(), marker.size()) != marker.size())
         throw std::runtime_error{"Failed to read file marker"};
     if(std::string_view{marker.data(), marker.size()} != "LIMITLESS"sv)
         throw std::runtime_error{"Not an LAF file"};
 
     auto header = std::array<char,10>{};
-    laf->mInFile.read(header.data(), header.size());
-    if(laf->mInFile.gcount() != header.size())
+    if(laf->mInFile.sgetn(header.data(), header.size()) != header.size())
         throw std::runtime_error{"Failed to read header"};
     while(std::string_view{header.data(), 4} != "HEAD"sv)
     {
@@ -552,8 +545,7 @@ auto LoadLAF(const fs::path &fname) -> std::unique_ptr<LafStream>
             hiter = std::copy_n(header.end()-1, 1, hiter);
 
         const auto toread = std::distance(hiter, header.end());
-        laf->mInFile.read(al::to_address(hiter), toread);
-        if(laf->mInFile.gcount() != toread)
+        if(laf->mInFile.sgetn(al::to_address(hiter), toread) != toread)
             throw std::runtime_error{"Failed to read header"};
     }
 
@@ -562,13 +554,13 @@ auto LoadLAF(const fs::path &fname) -> std::unique_ptr<LafStream>
         if(stype == 1) return Quality::s16;
         if(stype == 2) return Quality::f32;
         if(stype == 3) return Quality::s24;
-        throw std::runtime_error{"Invalid quality type: "+std::to_string(stype)};
+        throw std::runtime_error{fmt::format("Invalid quality type: {}", stype)};
     }();
 
     laf->mMode = [mode=int{header[5]}] {
         if(mode == 0) return Mode::Channels;
         if(mode == 1) return Mode::Objects;
-        throw std::runtime_error{"Invalid mode: "+std::to_string(mode)};
+        throw std::runtime_error{fmt::format("Invalid mode: {}", mode)};
     }();
 
     laf->mNumTracks = [input=al::span{header}.subspan<6,4>()] {
@@ -576,19 +568,19 @@ auto LoadLAF(const fs::path &fname) -> std::unique_ptr<LafStream>
             | (uint32_t{uint8_t(input[2])}<<16u) | (uint32_t{uint8_t(input[3])}<<24u);
     }();
 
-    std::cout<< "Filename: "<<fname<<'\n';
-    std::cout<< " quality: "<<GetQualityName(laf->mQuality)<<'\n';
-    std::cout<< " mode: "<<GetModeName(laf->mMode)<<'\n';
-    std::cout<< " track count: "<<laf->mNumTracks<<'\n';
+    fmt::println("Filename: {}", fname.string());
+    fmt::println(" quality: {}", GetQualityName(laf->mQuality));
+    fmt::println(" mode: {}", GetModeName(laf->mMode));
+    fmt::println(" track count: {}", laf->mNumTracks);
 
     if(laf->mNumTracks == 0)
         throw std::runtime_error{"No tracks"};
     if(laf->mNumTracks > 256)
-        throw std::runtime_error{"Too many tracks: "+std::to_string(laf->mNumTracks)};
+        throw std::runtime_error{fmt::format("Too many tracks: {}", laf->mNumTracks)};
 
     auto chandata = std::vector<char>(laf->mNumTracks*9_uz);
-    laf->mInFile.read(chandata.data(), std::streamsize(chandata.size()));
-    if(laf->mInFile.gcount() != std::streamsize(chandata.size()))
+    auto headersize = std::streamsize(chandata.size());
+    if(laf->mInFile.sgetn(chandata.data(), headersize) != headersize)
         throw std::runtime_error{"Failed to read channel header data"};
 
     if(laf->mMode == Mode::Channels)
@@ -623,7 +615,7 @@ auto LoadLAF(const fs::path &fname) -> std::unique_ptr<LafStream>
         auto y_axis = read_float(chan.subspan<4,4>());
         auto lfe_flag = int{chan[8]};
 
-        std::cout<< "Track "<<i<<": E="<<x_axis<<", A="<<y_axis<<" (LFE: "<<lfe_flag<<")\n";
+        fmt::println("Track {}: E={:f}, A={:f} (LFE: {})", i, x_axis, y_axis, lfe_flag);
 
         if(x_axis != x_axis && y_axis == 0.0)
         {
@@ -641,7 +633,7 @@ auto LoadLAF(const fs::path &fname) -> std::unique_ptr<LafStream>
             channel.mIsLfe = lfe_flag != 0;
         }
     }
-    std::cout<< "Channels: "<<laf->mChannels.size()<<'\n';
+    fmt::println("Channels: {}", laf->mChannels.size());
 
     /* For "objects" mode, ensure there's enough tracks with position data to
      * handle the audio channels.
@@ -650,8 +642,7 @@ auto LoadLAF(const fs::path &fname) -> std::unique_ptr<LafStream>
         MyAssert(((laf->mChannels.size()-1)>>4) == laf->mPosTracks.size()-1);
 
     auto footer = std::array<char,12>{};
-    laf->mInFile.read(footer.data(), footer.size());
-    if(laf->mInFile.gcount() != footer.size())
+    if(laf->mInFile.sgetn(footer.data(), footer.size()) != footer.size())
         throw std::runtime_error{"Failed to read sample header data"};
 
     laf->mSampleRate = [input=al::span{footer}.first<4>()] {
@@ -664,9 +655,9 @@ auto LoadLAF(const fs::path &fname) -> std::unique_ptr<LafStream>
             | (uint64_t{uint8_t(input[4])}<<32u) | (uint64_t{uint8_t(input[5])}<<40u)
             | (uint64_t{uint8_t(input[6])}<<48u) | (uint64_t{uint8_t(input[7])}<<56u);
     }();
-    std::cout<< "Sample rate: "<<laf->mSampleRate<<'\n';
-    std::cout<< "Length: "<<laf->mSampleCount<<" samples ("
-        <<(static_cast<double>(laf->mSampleCount)/static_cast<double>(laf->mSampleRate))<<" sec)\n";
+    fmt::println("Sample rate: {}", laf->mSampleRate);
+    fmt::println("Length: {} samples ({:.2f} sec)", laf->mSampleCount,
+        static_cast<double>(laf->mSampleCount)/static_cast<double>(laf->mSampleRate));
 
     /* Position vectors get split across the PCM chunks if the sample rate
      * isn't a multiple of 48. Each PCM chunk is exactly one second (the sample
@@ -711,9 +702,10 @@ try {
         break;
     }
     if(!laf->mALFormat || laf->mALFormat == -1)
-        throw std::runtime_error{"No supported format for "+std::string{GetQualityName(laf->mQuality)}+" samples"};
+        throw std::runtime_error{fmt::format("No supported format for {} samples",
+            GetQualityName(laf->mQuality))};
 
-    auto alloc_channel = [](Channel &channel)
+    static constexpr auto alloc_channel = [](Channel &channel)
     {
         alGenSources(1, &channel.mSource);
         alGenBuffers(ALsizei(channel.mBuffers.size()), channel.mBuffers.data());
@@ -754,7 +746,7 @@ try {
         }
 
         if(auto err=alGetError())
-            throw std::runtime_error{std::string{"OpenAL error: "} + alGetString(err)};
+            throw std::runtime_error{fmt::format("OpenAL error: {}", alGetString(err))};
     };
     std::for_each(laf->mChannels.begin(), laf->mChannels.end(), alloc_channel);
 
@@ -914,7 +906,7 @@ try {
     }
 }
 catch(std::exception& e) {
-    std::cerr<< "Error playing "<<fname<<":\n  "<<e.what()<<'\n';
+    fmt::println(stderr, "Error playing {}:\n  {}", fname, e.what());
 }
 
 auto main(al::span<std::string_view> args) -> int
@@ -922,8 +914,7 @@ auto main(al::span<std::string_view> args) -> int
     /* Print out usage if no arguments were specified */
     if(args.size() < 2)
     {
-        fprintf(stderr, "Usage: %.*s [-device <name>] <filenames...>\n", al::sizei(args[0]),
-            args[0].data());
+        fmt::println(stderr, "Usage: {} [-device <name>] <filenames...>\n", args[0]);
         return 1;
     }
     args = args.subspan(1);
@@ -954,7 +945,7 @@ auto main(al::span<std::string_view> args) -> int
     {
 #define LOAD_PROC(x) do {                                                     \
         x = reinterpret_cast<decltype(x)>(alGetProcAddress(#x));              \
-        if(!x) fprintf(stderr, "Failed to find function '%s'\n", #x);         \
+        if(!x) fmt::println(stderr, "Failed to find function '{}'\n", #x##sv);\
     } while(0)
         LOAD_PROC(alGenFilters);
         LOAD_PROC(alDeleteFilters);

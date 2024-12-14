@@ -1,6 +1,8 @@
 #ifndef ALC_CONTEXT_H
 #define ALC_CONTEXT_H
 
+#include "config.h"
+
 #include <atomic>
 #include <bitset>
 #include <cstdint>
@@ -20,10 +22,11 @@
 #include "al/listener.h"
 #include "althreads.h"
 #include "core/context.h"
+#include "fmt/core.h"
 #include "intrusive_ptr.h"
 #include "opthelpers.h"
 
-#ifdef ALSOFT_EAX
+#if ALSOFT_EAX
 #include "al/eax/api.h"
 #include "al/eax/exception.h"
 #include "al/eax/fx_slot_index.h"
@@ -70,9 +73,12 @@ struct DebugLogEntry {
 };
 
 
-struct ALCcontext final : public al::intrusive_ref<ALCcontext>, ContextBase {
-    const al::intrusive_ptr<ALCdevice> mALDevice;
+namespace al {
+struct Device;
+} // namespace al
 
+struct ALCcontext final : public al::intrusive_ref<ALCcontext>, ContextBase {
+    const al::intrusive_ptr<al::Device> mALDevice;
 
     bool mPropsDirty{true};
     bool mDeferUpdates{false};
@@ -116,12 +122,12 @@ struct ALCcontext final : public al::intrusive_ref<ALCcontext>, ContextBase {
     std::unique_ptr<ALeffectslot> mDefaultSlot;
 
     std::vector<std::string_view> mExtensions;
-    std::string mExtensionsString{};
+    std::string mExtensionsString;
 
     std::unordered_map<ALuint,std::string> mSourceNames;
     std::unordered_map<ALuint,std::string> mEffectSlotNames;
 
-    ALCcontext(al::intrusive_ptr<ALCdevice> device, ContextFlagBitset flags);
+    ALCcontext(al::intrusive_ptr<al::Device> device, ContextFlagBitset flags);
     ALCcontext(const ALCcontext&) = delete;
     ALCcontext& operator=(const ALCcontext&) = delete;
     ~ALCcontext() final;
@@ -157,12 +163,18 @@ struct ALCcontext final : public al::intrusive_ref<ALCcontext>, ContextBase {
      */
     void applyAllUpdates();
 
-#ifdef __MINGW32__
-    [[gnu::format(__MINGW_PRINTF_FORMAT, 3, 4)]]
-#else
-    [[gnu::format(printf, 3, 4)]]
-#endif
-    void setError(ALenum errorCode, const char *msg, ...);
+    void setErrorImpl(ALenum errorCode, const fmt::string_view fmt, fmt::format_args args);
+
+    template<typename ...Args>
+    void setError(ALenum errorCode, fmt::format_string<Args...> msg, Args&& ...args)
+    { setErrorImpl(errorCode, msg, fmt::make_format_args(args...)); }
+
+    [[noreturn]]
+    void throw_error_impl(ALenum errorCode, const fmt::string_view fmt, fmt::format_args args);
+
+    template<typename ...Args> [[noreturn]]
+    void throw_error(ALenum errorCode, fmt::format_string<Args...> fmt, Args&&... args)
+    { throw_error_impl(errorCode, fmt, fmt::make_format_args(args...)); }
 
     void sendDebugMessage(std::unique_lock<std::mutex> &debuglock, DebugSource source,
         DebugType type, ALuint id, DebugSeverity severity, std::string_view message);
@@ -212,7 +224,7 @@ public:
     /* Default effect that applies to sources that don't have an effect on send 0. */
     static ALeffect sDefaultEffect;
 
-#ifdef ALSOFT_EAX
+#if ALSOFT_EAX
     bool hasEax() const noexcept { return mEaxIsInitialized; }
     bool eaxIsCapable() const noexcept;
 
@@ -550,7 +562,7 @@ void UpdateContextProps(ALCcontext *context);
 inline bool TrapALError{false};
 
 
-#ifdef ALSOFT_EAX
+#if ALSOFT_EAX
 auto AL_APIENTRY EAXSet(const GUID *property_set_id, ALuint property_id,
     ALuint source_id, ALvoid *value, ALuint value_size) noexcept -> ALenum;
 

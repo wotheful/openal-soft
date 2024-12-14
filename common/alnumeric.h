@@ -1,6 +1,8 @@
 #ifndef AL_NUMERIC_H
 #define AL_NUMERIC_H
 
+#include "config_simd.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -11,7 +13,7 @@
 #ifdef HAVE_INTRIN_H
 #include <intrin.h>
 #endif
-#ifdef HAVE_SSE_INTRINSICS
+#if HAVE_SSE_INTRINSICS
 #include <xmmintrin.h>
 #endif
 
@@ -29,6 +31,14 @@ constexpr auto operator "" _uz(unsigned long long n) noexcept { return static_ca
 constexpr auto operator "" _zu(unsigned long long n) noexcept { return static_cast<std::size_t>(n); }
 
 
+template<typename T, std::enable_if_t<std::is_integral_v<T>,bool> = true>
+constexpr auto as_unsigned(T value) noexcept
+{
+    using UT = std::make_unsigned_t<T>;
+    return static_cast<UT>(value);
+}
+
+
 constexpr auto GetCounterSuffix(size_t count) noexcept -> const char*
 {
     auto &suffix = (((count%100)/10) == 1) ? "th" :
@@ -39,9 +49,9 @@ constexpr auto GetCounterSuffix(size_t count) noexcept -> const char*
 }
 
 
-constexpr inline float lerpf(float val1, float val2, float mu) noexcept
+constexpr auto lerpf(float val1, float val2, float mu) noexcept -> float
 { return val1 + (val2-val1)*mu; }
-constexpr inline double lerpd(double val1, double val2, double mu) noexcept
+constexpr auto lerpd(double val1, double val2, double mu) noexcept -> double
 { return val1 + (val2-val1)*mu; }
 
 
@@ -84,7 +94,7 @@ constexpr T RoundUp(T value, al::type_identity_t<T> r) noexcept
  */
 inline int fastf2i(float f) noexcept
 {
-#if defined(HAVE_SSE_INTRINSICS)
+#if HAVE_SSE_INTRINSICS
     return _mm_cvt_ss2si(_mm_set_ss(f));
 
 #elif defined(_MSC_VER) && defined(_M_IX86_FP) && _M_IX86_FP == 0
@@ -112,7 +122,7 @@ inline unsigned int fastf2u(float f) noexcept
 /** Converts float-to-int using standard behavior (truncation). */
 inline int float2int(float f) noexcept
 {
-#if defined(HAVE_SSE_INTRINSICS)
+#if HAVE_SSE_INTRINSICS
     return _mm_cvtt_ss2si(_mm_set_ss(f));
 
 #elif (defined(_MSC_VER) && defined(_M_IX86_FP) && _M_IX86_FP == 0) \
@@ -143,7 +153,7 @@ inline unsigned int float2uint(float f) noexcept
 /** Converts double-to-int using standard behavior (truncation). */
 inline int double2int(double d) noexcept
 {
-#if defined(HAVE_SSE_INTRINSICS)
+#if HAVE_SSE_INTRINSICS
     return _mm_cvttsd_si32(_mm_set_sd(d));
 
 #elif (defined(_MSC_VER) && defined(_M_IX86_FP) && _M_IX86_FP < 2) \

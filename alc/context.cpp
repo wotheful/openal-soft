@@ -39,7 +39,7 @@
 #include "ringbuffer.h"
 #include "vecmat.h"
 
-#ifdef ALSOFT_EAX
+#if ALSOFT_EAX
 #include "al/eax/call.h"
 #include "al/eax/globals.h"
 #endif // ALSOFT_EAX
@@ -73,7 +73,7 @@ std::vector<std::string_view> getContextExtensions() noexcept
         "AL_EXT_STEREO_ANGLES"sv,
         "AL_LOKI_quadriphonic"sv,
         "AL_SOFT_bformat_ex"sv,
-        "AL_SOFTX_bformat_hoa"sv,
+        "AL_SOFT_bformat_hoa"sv,
         "AL_SOFT_block_alignment"sv,
         "AL_SOFT_buffer_length_query"sv,
         "AL_SOFT_callback_buffer"sv,
@@ -110,7 +110,7 @@ ALCcontext::ThreadCtx::~ThreadCtx()
     if(ALCcontext *ctx{std::exchange(ALCcontext::sLocalContext, nullptr)})
     {
         const bool result{ctx->releaseIfNoDelete()};
-        ERR("Context %p current for thread being destroyed%s!\n", voidp{ctx},
+        ERR("Context {} current for thread being destroyed{}!", voidp{ctx},
             result ? "" : ", leak detected");
     }
 }
@@ -119,7 +119,7 @@ thread_local ALCcontext::ThreadCtx ALCcontext::sThreadContext;
 ALeffect ALCcontext::sDefaultEffect;
 
 
-ALCcontext::ALCcontext(al::intrusive_ptr<ALCdevice> device, ContextFlagBitset flags)
+ALCcontext::ALCcontext(al::intrusive_ptr<al::Device> device, ContextFlagBitset flags)
     : ContextBase{device.get()}, mALDevice{std::move(device)}, mContextFlags{flags}
 {
     mDebugGroups.emplace_back(DebugSource::Other, 0, std::string{});
@@ -132,17 +132,17 @@ ALCcontext::ALCcontext(al::intrusive_ptr<ALCdevice> device, ContextFlagBitset fl
 
 ALCcontext::~ALCcontext()
 {
-    TRACE("Freeing context %p\n", voidp{this});
+    TRACE("Freeing context {}", voidp{this});
 
     size_t count{std::accumulate(mSourceList.cbegin(), mSourceList.cend(), 0_uz,
         [](size_t cur, const SourceSubList &sublist) noexcept -> size_t
         { return cur + static_cast<uint>(al::popcount(~sublist.FreeMask)); })};
     if(count > 0)
-        WARN("%zu Source%s not deleted\n", count, (count==1)?"":"s");
+        WARN("{} Source{} not deleted", count, (count==1)?"":"s");
     mSourceList.clear();
     mNumSources = 0;
 
-#ifdef ALSOFT_EAX
+#if ALSOFT_EAX
     eaxUninitialize();
 #endif // ALSOFT_EAX
 
@@ -151,7 +151,7 @@ ALCcontext::~ALCcontext()
         [](size_t cur, const EffectSlotSubList &sublist) noexcept -> size_t
         { return cur + static_cast<uint>(al::popcount(~sublist.FreeMask)); });
     if(count > 0)
-        WARN("%zu AuxiliaryEffectSlot%s not deleted\n", count, (count==1)?"":"s");
+        WARN("{} AuxiliaryEffectSlot{} not deleted", count, (count==1)?"":"s");
     mEffectSlotList.clear();
     mNumEffectSlots = 0;
 }
@@ -196,7 +196,7 @@ void ALCcontext::init()
         mExtensions.emplace_back("AL_SOFT_buffer_sub_data"sv);
     }
 
-#ifdef ALSOFT_EAX
+#if ALSOFT_EAX
     eax_initialize_extensions();
 #endif // ALSOFT_EAX
 
@@ -219,7 +219,7 @@ void ALCcontext::init()
         mExtensionsString = std::move(extensions);
     }
 
-#ifdef ALSOFT_EAX
+#if ALSOFT_EAX
     eax_set_defaults();
 #endif
 
@@ -228,14 +228,14 @@ void ALCcontext::init()
     mParams.Velocity = alu::Vector{};
     mParams.Gain = mListener.Gain;
     mParams.MetersPerUnit = mListener.mMetersPerUnit
-#ifdef ALSOFT_EAX
+#if ALSOFT_EAX
         * eaxGetDistanceFactor()
 #endif
         ;
     mParams.AirAbsorptionGainHF = mAirAbsorptionGainHF;
     mParams.DopplerFactor = mDopplerFactor;
     mParams.SpeedOfSound = mSpeedOfSound * mDopplerVelocity
-#ifdef ALSOFT_EAX
+#if ALSOFT_EAX
         / eaxGetDistanceFactor()
 #endif
         ;
@@ -255,37 +255,34 @@ void ALCcontext::deinit()
 {
     if(sLocalContext == this)
     {
-        WARN("%p released while current on thread\n", voidp{this});
+        WARN("{} released while current on thread", voidp{this});
+        auto _ = ContextRef{sLocalContext};
         sThreadContext.set(nullptr);
-        const auto rc [[maybe_unused]] = dec_ref();
-        assert(rc > 0);
     }
 
-    ALCcontext *origctx{this};
-    if(sGlobalContext.compare_exchange_strong(origctx, nullptr))
+    if(ALCcontext *origctx{this}; sGlobalContext.compare_exchange_strong(origctx, nullptr))
     {
+        auto _ = ContextRef{origctx};
         while(sGlobalContextLock.load()) {
             /* Wait to make sure another thread didn't get the context and is
              * trying to increment its refcount.
              */
         }
-        const auto rc [[maybe_unused]] = dec_ref();
-        assert(rc > 0);
     }
 
     bool stopPlayback{};
     /* First make sure this context exists in the device's list. */
-    auto *oldarray = mDevice->mContexts.load(std::memory_order_acquire);
-    if(auto toremove = static_cast<size_t>(std::count(oldarray->begin(), oldarray->end(), this)))
+    auto oldarray = al::span{*mDevice->mContexts.load(std::memory_order_acquire)};
+    if(auto toremove = static_cast<size_t>(std::count(oldarray.begin(), oldarray.end(), this)))
     {
         using ContextArray = al::FlexArray<ContextBase*>;
-        const size_t newsize{oldarray->size() - toremove};
+        const auto newsize = size_t{oldarray.size() - toremove};
         auto newarray = ContextArray::Create(newsize);
 
         /* Copy the current/old context handles to the new array, excluding the
          * given context.
          */
-        std::copy_if(oldarray->begin(), oldarray->end(), newarray->begin(),
+        std::copy_if(oldarray.begin(), oldarray.end(), newarray->begin(),
             [this](ContextBase *ctx) { return ctx != this; });
 
         /* Store the new context array in the device. Wait for any current mix
@@ -297,7 +294,7 @@ void ALCcontext::deinit()
         stopPlayback = (newsize == 0);
     }
     else
-        stopPlayback = oldarray->empty();
+        stopPlayback = oldarray.empty();
 
     StopEventThrd(this);
 
@@ -318,7 +315,7 @@ void ALCcontext::applyAllUpdates()
         /* busy-wait */
     }
 
-#ifdef ALSOFT_EAX
+#if ALSOFT_EAX
     if(mEaxNeedsCommit)
         eaxCommit();
 #endif
@@ -335,7 +332,7 @@ void ALCcontext::applyAllUpdates()
 }
 
 
-#ifdef ALSOFT_EAX
+#if ALSOFT_EAX
 namespace {
 
 template<typename F>
@@ -582,7 +579,8 @@ unsigned long ALCcontext::eax_detect_speaker_configuration() const
      */
     case DevFmtAmbi3D: return SPEAKERS_7;
     }
-    ERR(EAX_PREFIX "Unexpected device channel format 0x%x.\n", mDevice->FmtChans);
+    ERR(EAX_PREFIX "Unexpected device channel format {:#x}.",
+        uint{al::to_underlying(mDevice->FmtChans)});
     return HEADPHONES;
 
 #undef EAX_PREFIX

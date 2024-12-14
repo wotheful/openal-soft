@@ -38,8 +38,8 @@
 #include <algorithm>
 #include <functional>
 
+#include "alnumeric.h"
 #include "alsem.h"
-#include "alstring.h"
 #include "althrd_setname.h"
 #include "core/device.h"
 #include "core/helpers.h"
@@ -85,7 +85,7 @@ void ProbePlaybackDevices()
             }
             dname = std::move(newname);
 
-            TRACE("Got device \"%s\", ID %u\n", dname.c_str(), i);
+            TRACE("Got device \"{}\", ID {}", dname, i);
         }
         PlaybackDevices.emplace_back(std::move(dname));
     }
@@ -116,7 +116,7 @@ void ProbeCaptureDevices()
             }
             dname = std::move(newname);
 
-            TRACE("Got device \"%s\", ID %u\n", dname.c_str(), i);
+            TRACE("Got device \"{}\", ID {}", dname, i);
         }
         CaptureDevices.emplace_back(std::move(dname));
     }
@@ -212,8 +212,8 @@ void WinMMPlayback::open(std::string_view name)
         std::find(PlaybackDevices.cbegin(), PlaybackDevices.cend(), name) :
         PlaybackDevices.cbegin();
     if(iter == PlaybackDevices.cend())
-        throw al::backend_exception{al::backend_error::NoDevice, "Device name \"%.*s\" not found",
-            al::sizei(name), name.data()};
+        throw al::backend_exception{al::backend_error::NoDevice, "Device name \"{}\" not found",
+            name};
     auto DeviceID = static_cast<UINT>(std::distance(PlaybackDevices.cbegin(), iter));
 
     DevFmtType fmttype{mDevice->FmtType};
@@ -245,7 +245,7 @@ void WinMMPlayback::open(std::string_view name)
         if(res == MMSYSERR_NOERROR) break;
 
         if(fmttype != DevFmtFloat)
-            throw al::backend_exception{al::backend_error::DeviceError, "waveOutOpen failed: %u",
+            throw al::backend_exception{al::backend_error::DeviceError, "waveOutOpen failed: {}",
                 res};
 
         fmttype = DevFmtShort;
@@ -270,7 +270,7 @@ bool WinMMPlayback::reset()
             mDevice->FmtType = DevFmtFloat;
         else
         {
-            ERR("Unhandled IEEE float sample depth: %d\n", mFormat.wBitsPerSample);
+            ERR("Unhandled IEEE float sample depth: {}", mFormat.wBitsPerSample);
             return false;
         }
     }
@@ -282,13 +282,13 @@ bool WinMMPlayback::reset()
             mDevice->FmtType = DevFmtUByte;
         else
         {
-            ERR("Unhandled PCM sample depth: %d\n", mFormat.wBitsPerSample);
+            ERR("Unhandled PCM sample depth: {}", mFormat.wBitsPerSample);
             return false;
         }
     }
     else
     {
-        ERR("Unhandled format tag: 0x%04x\n", mFormat.wFormatTag);
+        ERR("Unhandled format tag: {:#04x}", as_unsigned(mFormat.wFormatTag));
         return false;
     }
 
@@ -298,7 +298,7 @@ bool WinMMPlayback::reset()
         mDevice->FmtChans = DevFmtMono;
     else
     {
-        ERR("Unhandled channel count: %d\n", mFormat.nChannels);
+        ERR("Unhandled channel count: {}", mFormat.nChannels);
         return false;
     }
     setDefaultWFXChannelOrder();
@@ -332,7 +332,7 @@ void WinMMPlayback::start()
     }
     catch(std::exception& e) {
         throw al::backend_exception{al::backend_error::DeviceError,
-            "Failed to start mixing thread: %s", e.what()};
+            "Failed to start mixing thread: {}", e.what()};
     }
 }
 
@@ -443,8 +443,8 @@ void WinMMCapture::open(std::string_view name)
         std::find(CaptureDevices.cbegin(), CaptureDevices.cend(), name) :
         CaptureDevices.cbegin();
     if(iter == CaptureDevices.cend())
-        throw al::backend_exception{al::backend_error::NoDevice, "Device name \"%.*s\" not found",
-            al::sizei(name), name.data()};
+        throw al::backend_exception{al::backend_error::NoDevice, "Device name \"{}\" not found",
+            name};
     auto DeviceID = static_cast<UINT>(std::distance(CaptureDevices.cbegin(), iter));
 
     switch(mDevice->FmtChans)
@@ -461,7 +461,7 @@ void WinMMCapture::open(std::string_view name)
     case DevFmtX7144:
     case DevFmtX3D71:
     case DevFmtAmbi3D:
-        throw al::backend_exception{al::backend_error::DeviceError, "%s capture not supported",
+        throw al::backend_exception{al::backend_error::DeviceError, "{} capture not supported",
             DevFmtChannelsString(mDevice->FmtChans)};
     }
 
@@ -476,7 +476,7 @@ void WinMMCapture::open(std::string_view name)
     case DevFmtByte:
     case DevFmtUShort:
     case DevFmtUInt:
-        throw al::backend_exception{al::backend_error::DeviceError, "%s samples not supported",
+        throw al::backend_exception{al::backend_error::DeviceError, "{} samples not supported",
             DevFmtTypeString(mDevice->FmtType)};
     }
 
@@ -494,7 +494,7 @@ void WinMMCapture::open(std::string_view name)
         reinterpret_cast<DWORD_PTR>(&WinMMCapture::waveInProcC),
         reinterpret_cast<DWORD_PTR>(this), CALLBACK_FUNCTION)};
     if(res != MMSYSERR_NOERROR)
-        throw al::backend_exception{al::backend_error::DeviceError, "waveInOpen failed: %u", res};
+        throw al::backend_exception{al::backend_error::DeviceError, "waveInOpen failed: {}", res};
 
     // Ensure each buffer is 50ms each
     DWORD BufferSize{mFormat.nAvgBytesPerSec / 20u};
@@ -537,7 +537,7 @@ void WinMMCapture::start()
     }
     catch(std::exception& e) {
         throw al::backend_exception{al::backend_error::DeviceError,
-            "Failed to start recording thread: %s", e.what()};
+            "Failed to start recording thread: {}", e.what()};
     }
 }
 
