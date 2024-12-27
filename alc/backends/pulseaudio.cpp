@@ -50,6 +50,7 @@
 #include "core/device.h"
 #include "core/logging.h"
 #include "dynload.h"
+#include "fmt/core.h"
 #include "opthelpers.h"
 #include "strutils.h"
 
@@ -362,17 +363,13 @@ public:
         /* Make sure the display name (description) is unique. Append a number
          * counter as needed.
          */
-        int count{1};
-        std::string newname{info->description};
+        auto count = 1;
+        auto newname = std::string{info->description};
         while(checkName(PlaybackDevices, newname))
-        {
-            newname = info->description;
-            newname += " #";
-            newname += std::to_string(++count);
-        }
-        PlaybackDevices.emplace_back(DevMap{std::move(newname), info->name});
-        DevMap &newentry = PlaybackDevices.back();
+            newname = fmt::format("{} #{}", info->description, ++count);
 
+        const auto &newentry = PlaybackDevices.emplace_back(DevMap{std::move(newname),
+            info->name});
         TRACE("Got device \"{}\", \"{}\"", newentry.name, newentry.device_name);
     }
 
@@ -393,17 +390,12 @@ public:
         /* Make sure the display name (description) is unique. Append a number
          * counter as needed.
          */
-        int count{1};
-        std::string newname{info->description};
+        auto count = 1;
+        auto newname = std::string{info->description};
         while(checkName(CaptureDevices, newname))
-        {
-            newname = info->description;
-            newname += " #";
-            newname += std::to_string(++count);
-        }
-        CaptureDevices.emplace_back(DevMap{std::move(newname), info->name});
-        DevMap &newentry = CaptureDevices.back();
+            newname = fmt::format("{} #{}", info->description, ++count);
 
+        const auto &newentry = CaptureDevices.emplace_back(DevMap{std::move(newname), info->name});
         TRACE("Got device \"{}\", \"{}\"", newentry.name, newentry.device_name);
     }
 
@@ -643,7 +635,7 @@ PulseMainloop gGlobalMainloop;
 
 
 struct PulsePlayback final : public BackendBase {
-    PulsePlayback(DeviceBase *device) noexcept : BackendBase{device} { }
+    explicit PulsePlayback(DeviceBase *device) noexcept : BackendBase{device} { }
     ~PulsePlayback() override;
 
     void bufferAttrCallback(pa_stream *stream) noexcept;
@@ -949,16 +941,16 @@ bool PulsePlayback::reset()
         mSpec.format = PA_SAMPLE_FLOAT32NE;
         break;
     }
-    mSpec.rate = mDevice->Frequency;
+    mSpec.rate = mDevice->mSampleRate;
     mSpec.channels = static_cast<uint8_t>(mDevice->channelsFromFmt());
     if(pa_sample_spec_valid(&mSpec) == 0)
         throw al::backend_exception{al::backend_error::DeviceError, "Invalid sample spec"};
 
     const auto frame_size = static_cast<uint>(pa_frame_size(&mSpec));
     mAttr.maxlength = ~0u;
-    mAttr.tlength = mDevice->BufferSize * frame_size;
+    mAttr.tlength = mDevice->mBufferSize * frame_size;
     mAttr.prebuf = 0u;
-    mAttr.minreq = mDevice->UpdateSize * frame_size;
+    mAttr.minreq = mDevice->mUpdateSize * frame_size;
     mAttr.fragsize = ~0u;
 
     mStream = plock.connectStream(deviceName, flags, &mAttr, &mSpec, &chanmap,
@@ -975,15 +967,15 @@ bool PulsePlayback::reset()
     mSpec = *(pa_stream_get_sample_spec(mStream));
     mFrameSize = static_cast<uint>(pa_frame_size(&mSpec));
 
-    if(mDevice->Frequency != mSpec.rate)
+    if(mDevice->mSampleRate != mSpec.rate)
     {
         /* Server updated our playback rate, so modify the buffer attribs
          * accordingly.
          */
-        const auto scale = static_cast<double>(mSpec.rate) / mDevice->Frequency;
-        const auto perlen = std::clamp(std::round(scale*mDevice->UpdateSize), 64.0, 8192.0);
+        const auto scale = static_cast<double>(mSpec.rate) / mDevice->mSampleRate;
+        const auto perlen = std::clamp(std::round(scale*mDevice->mUpdateSize), 64.0, 8192.0);
         const auto bufmax = uint{std::numeric_limits<int>::max()} / mFrameSize;
-        const auto buflen = std::clamp(std::round(scale*mDevice->BufferSize), perlen*2.0,
+        const auto buflen = std::clamp(std::round(scale*mDevice->mBufferSize), perlen*2.0,
             static_cast<double>(bufmax));
 
         mAttr.maxlength = ~0u;
@@ -995,7 +987,7 @@ bool PulsePlayback::reset()
             &mMainloop);
         plock.waitForOperation(op);
 
-        mDevice->Frequency = mSpec.rate;
+        mDevice->mSampleRate = mSpec.rate;
     }
 
     constexpr auto attr_callback = [](pa_stream *stream, void *pdata) noexcept
@@ -1003,8 +995,8 @@ bool PulsePlayback::reset()
     pa_stream_set_buffer_attr_callback(mStream, attr_callback, this);
     bufferAttrCallback(mStream);
 
-    mDevice->BufferSize = mAttr.tlength / mFrameSize;
-    mDevice->UpdateSize = mAttr.minreq / mFrameSize;
+    mDevice->mBufferSize = mAttr.tlength / mFrameSize;
+    mDevice->mUpdateSize = mAttr.minreq / mFrameSize;
 
     return true;
 }
@@ -1063,7 +1055,7 @@ ClockLatency PulsePlayback::getClockLatency()
          */
         if(err != -PA_ERR_NODATA)
             ERR("Failed to get stream latency: {:#x}", as_unsigned(err));
-        latency = mDevice->BufferSize - mDevice->UpdateSize;
+        latency = mDevice->mBufferSize - mDevice->mUpdateSize;
         neg = 0;
     }
     else if(neg) UNLIKELY
@@ -1075,7 +1067,7 @@ ClockLatency PulsePlayback::getClockLatency()
 
 
 struct PulseCapture final : public BackendBase {
-    PulseCapture(DeviceBase *device) noexcept : BackendBase{device} { }
+    explicit PulseCapture(DeviceBase *device) noexcept : BackendBase{device} { }
     ~PulseCapture() override;
 
     void streamStateCallback(pa_stream *stream) noexcept;
@@ -1206,18 +1198,18 @@ void PulseCapture::open(std::string_view name)
         throw al::backend_exception{al::backend_error::DeviceError,
             "{} capture samples not supported", DevFmtTypeString(mDevice->FmtType)};
     }
-    mSpec.rate = mDevice->Frequency;
+    mSpec.rate = mDevice->mSampleRate;
     mSpec.channels = static_cast<uint8_t>(mDevice->channelsFromFmt());
     if(pa_sample_spec_valid(&mSpec) == 0)
         throw al::backend_exception{al::backend_error::DeviceError, "Invalid sample format"};
 
     const auto frame_size = static_cast<uint>(pa_frame_size(&mSpec));
-    const uint samples{std::max(mDevice->BufferSize, mDevice->Frequency*100u/1000u)};
+    const uint samples{std::max(mDevice->mBufferSize, mDevice->mSampleRate*100u/1000u)};
     mAttr.minreq = ~0u;
     mAttr.prebuf = ~0u;
     mAttr.maxlength = samples * frame_size;
     mAttr.tlength = ~0u;
-    mAttr.fragsize = std::min(samples, mDevice->Frequency*50u/1000u) * frame_size;
+    mAttr.fragsize = std::min(samples, mDevice->mSampleRate*50u/1000u) * frame_size;
 
     pa_stream_flags_t flags{PA_STREAM_START_CORKED | PA_STREAM_ADJUST_LATENCY};
     if(!GetConfigValueBool({}, "pulse", "allow-moves", true))

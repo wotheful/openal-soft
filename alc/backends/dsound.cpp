@@ -37,7 +37,6 @@
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
-#include <functional>
 #include <memory.h>
 #include <string>
 #include <thread>
@@ -51,6 +50,7 @@
 #include "core/helpers.h"
 #include "core/logging.h"
 #include "dynload.h"
+#include "fmt/core.h"
 #include "ringbuffer.h"
 #include "strutils.h"
 
@@ -144,16 +144,11 @@ BOOL CALLBACK DSoundEnumDevices(GUID *guid, const WCHAR *desc, const WCHAR*, voi
     auto& devices = *static_cast<std::vector<DevMap>*>(data);
     const auto basename = wstr_to_utf8(desc);
 
-    int count{1};
-    std::string newname{basename};
+    auto count = 1;
+    auto newname = basename;
     while(checkName(devices, newname))
-    {
-        newname = basename;
-        newname += " #";
-        newname += std::to_string(++count);
-    }
-    devices.emplace_back(std::move(newname), *guid);
-    const DevMap &newentry = devices.back();
+        newname = fmt::format("{} #{}", basename, ++count);
+    const DevMap &newentry = devices.emplace_back(std::move(newname), *guid);
 
     OLECHAR *guidstr{nullptr};
     HRESULT hr{StringFromCLSID(*guid, &guidstr)};
@@ -168,7 +163,7 @@ BOOL CALLBACK DSoundEnumDevices(GUID *guid, const WCHAR *desc, const WCHAR*, voi
 
 
 struct DSoundPlayback final : public BackendBase {
-    DSoundPlayback(DeviceBase *device) noexcept : BackendBase{device} { }
+    explicit DSoundPlayback(DeviceBase *device) noexcept : BackendBase{device} { }
     ~DSoundPlayback() override;
 
     int mixerProc();
@@ -219,7 +214,7 @@ FORCE_ALIGN int DSoundPlayback::mixerProc()
 
     const size_t FrameStep{mDevice->channelsFromFmt()};
     uint FrameSize{mDevice->frameSizeFromFmt()};
-    DWORD FragSize{mDevice->UpdateSize * FrameSize};
+    DWORD FragSize{mDevice->mUpdateSize * FrameSize};
 
     bool Playing{false};
     DWORD LastCursor{0u};
@@ -430,7 +425,7 @@ bool DSoundPlayback::reset()
         OutputType.Format.wBitsPerSample = static_cast<WORD>(mDevice->bytesFromFmt() * 8);
         OutputType.Format.nBlockAlign = static_cast<WORD>(OutputType.Format.nChannels *
             OutputType.Format.wBitsPerSample / 8);
-        OutputType.Format.nSamplesPerSec = mDevice->Frequency;
+        OutputType.Format.nSamplesPerSec = mDevice->mSampleRate;
         OutputType.Format.nAvgBytesPerSec = OutputType.Format.nSamplesPerSec *
             OutputType.Format.nBlockAlign;
         OutputType.Format.cbSize = 0;
@@ -464,16 +459,16 @@ bool DSoundPlayback::reset()
         if(FAILED(hr))
             break;
 
-        uint num_updates{mDevice->BufferSize / mDevice->UpdateSize};
+        uint num_updates{mDevice->mBufferSize / mDevice->mUpdateSize};
         if(num_updates > MAX_UPDATES)
             num_updates = MAX_UPDATES;
-        mDevice->BufferSize = mDevice->UpdateSize * num_updates;
+        mDevice->mBufferSize = mDevice->mUpdateSize * num_updates;
 
         DSBUFFERDESC DSBDescription{};
         DSBDescription.dwSize = sizeof(DSBDescription);
         DSBDescription.dwFlags = DSBCAPS_CTRLPOSITIONNOTIFY | DSBCAPS_GETCURRENTPOSITION2
             | DSBCAPS_GLOBALFOCUS;
-        DSBDescription.dwBufferBytes = mDevice->BufferSize * OutputType.Format.nBlockAlign;
+        DSBDescription.dwBufferBytes = mDevice->mBufferSize * OutputType.Format.nBlockAlign;
         DSBDescription.lpwfxFormat = &OutputType.Format;
 
         hr = mDS->CreateSoundBuffer(&DSBDescription, al::out_ptr(mBuffer), nullptr);
@@ -487,13 +482,13 @@ bool DSoundPlayback::reset()
         hr = mBuffer->QueryInterface(IID_IDirectSoundNotify, al::out_ptr(mNotifies));
         if(SUCCEEDED(hr))
         {
-            uint num_updates{mDevice->BufferSize / mDevice->UpdateSize};
+            uint num_updates{mDevice->mBufferSize / mDevice->mUpdateSize};
             assert(num_updates <= MAX_UPDATES);
 
             std::array<DSBPOSITIONNOTIFY,MAX_UPDATES> nots{};
             for(uint i{0};i < num_updates;++i)
             {
-                nots[i].dwOffset = i * mDevice->UpdateSize * OutputType.Format.nBlockAlign;
+                nots[i].dwOffset = i * mDevice->mUpdateSize * OutputType.Format.nBlockAlign;
                 nots[i].hEventNotify = mNotifyEvent;
             }
             if(mNotifies->SetNotificationPositions(num_updates, nots.data()) != DS_OK)
@@ -519,7 +514,7 @@ void DSoundPlayback::start()
 {
     try {
         mKillNow.store(false, std::memory_order_release);
-        mThread = std::thread{std::mem_fn(&DSoundPlayback::mixerProc), this};
+        mThread = std::thread{&DSoundPlayback::mixerProc, this};
     }
     catch(std::exception& e) {
         throw al::backend_exception{al::backend_error::DeviceError,
@@ -538,7 +533,7 @@ void DSoundPlayback::stop()
 
 
 struct DSoundCapture final : public BackendBase {
-    DSoundCapture(DeviceBase *device) noexcept : BackendBase{device} { }
+    explicit DSoundCapture(DeviceBase *device) noexcept : BackendBase{device} { }
     ~DSoundCapture() override;
 
     void open(std::string_view name) override;
@@ -641,7 +636,7 @@ void DSoundCapture::open(std::string_view name)
     InputType.Format.wBitsPerSample = static_cast<WORD>(mDevice->bytesFromFmt() * 8);
     InputType.Format.nBlockAlign = static_cast<WORD>(InputType.Format.nChannels *
         InputType.Format.wBitsPerSample / 8);
-    InputType.Format.nSamplesPerSec = mDevice->Frequency;
+    InputType.Format.nSamplesPerSec = mDevice->mSampleRate;
     InputType.Format.nAvgBytesPerSec = InputType.Format.nSamplesPerSec *
         InputType.Format.nBlockAlign;
     InputType.Format.cbSize = 0;
@@ -658,7 +653,7 @@ void DSoundCapture::open(std::string_view name)
         InputType.Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
     }
 
-    const uint samples{std::max(mDevice->BufferSize, mDevice->Frequency/10u)};
+    const uint samples{std::max(mDevice->mBufferSize, mDevice->mSampleRate/10u)};
 
     DSCBUFFERDESC DSCBDescription{};
     DSCBDescription.dwSize = sizeof(DSCBDescription);
@@ -671,7 +666,7 @@ void DSoundCapture::open(std::string_view name)
     if(SUCCEEDED(hr))
         mDSC->CreateCaptureBuffer(&DSCBDescription, al::out_ptr(mDSCbuffer), nullptr);
     if(SUCCEEDED(hr))
-         mRing = RingBuffer::Create(mDevice->BufferSize, InputType.Format.nBlockAlign, false);
+         mRing = RingBuffer::Create(mDevice->mBufferSize, InputType.Format.nBlockAlign, false);
 
     if(FAILED(hr))
     {

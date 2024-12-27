@@ -213,17 +213,20 @@ class DataQueue {
     }
 
 public:
-    DataQueue(size_t size_limit) : mSizeLimit{size_limit} { }
+    explicit DataQueue(size_t size_limit) : mSizeLimit{size_limit} { }
 
     int sendPacket(AVCodecContext *codecctx)
     {
-        AVPacketPtr packet{getPacket()};
+        auto packet = AVPacketPtr{getPacket()};
 
-        int ret{};
+        auto ret = int{};
         {
-            std::unique_lock<std::mutex> flock{mFrameMutex};
-            while((ret=avcodec_send_packet(codecctx, packet.get())) == AVERROR(EAGAIN))
-                mInFrameCond.wait_for(flock, milliseconds{50});
+            auto flock = std::unique_lock{mFrameMutex};
+            mInFrameCond.wait(flock, [codecctx,pkt=packet.get(),&ret]()
+            {
+                ret = avcodec_send_packet(codecctx, pkt);
+                return ret != AVERROR(EAGAIN);
+            });
         }
         mOutFrameCond.notify_one();
 
@@ -240,11 +243,14 @@ public:
 
     int receiveFrame(AVCodecContext *codecctx, AVFrame *frame)
     {
-        int ret{};
+        auto ret = int{};
         {
-            std::unique_lock<std::mutex> flock{mFrameMutex};
-            while((ret=avcodec_receive_frame(codecctx, frame)) == AVERROR(EAGAIN))
-                mOutFrameCond.wait_for(flock, milliseconds{50});
+            auto flock = std::unique_lock{mFrameMutex};
+            mOutFrameCond.wait(flock, [codecctx,frame,&ret]()
+            {
+                ret = avcodec_receive_frame(codecctx, frame);
+                return ret != AVERROR(EAGAIN);
+            });
         }
         mInFrameCond.notify_one();
         return ret;
@@ -342,7 +348,7 @@ struct AudioState {
     std::array<ALuint,AudioBufferCount> mBuffers{};
     ALuint mBufferIdx{0};
 
-    AudioState(MovieState &movie) : mMovie(movie)
+    explicit AudioState(MovieState &movie) : mMovie(movie)
     { mConnected.test_and_set(std::memory_order_relaxed); }
     ~AudioState()
     {
@@ -415,7 +421,7 @@ struct VideoState {
     std::atomic<bool> mEOS{false};
     std::atomic<bool> mFinalUpdate{false};
 
-    VideoState(MovieState &movie) : mMovie(movie) { }
+    explicit VideoState(MovieState &movie) : mMovie(movie) { }
     ~VideoState()
     {
         if(mImage)
@@ -453,7 +459,7 @@ struct MovieState {
 
     std::string mFilename;
 
-    MovieState(std::string_view fname) : mAudio{*this}, mVideo{*this}, mFilename{fname}
+    explicit MovieState(std::string_view fname) : mAudio{*this}, mVideo{*this}, mFilename{fname}
     { }
     ~MovieState()
     {
@@ -871,7 +877,7 @@ void AL_APIENTRY AudioState::eventCallback(ALenum eventType, ALuint object, ALui
     case AL_EVENT_TYPE_BUFFER_COMPLETED_SOFT: fmt::print("Buffer completed"); break;
     case AL_EVENT_TYPE_SOURCE_STATE_CHANGED_SOFT: fmt::print("Source state changed"); break;
     case AL_EVENT_TYPE_DISCONNECTED_SOFT: fmt::print("Disconnected"); break;
-    default: fmt::print("{:#04x}", as_unsigned(eventType)); break;
+    default: fmt::print("{:#x}", as_unsigned(eventType)); break;
     }
     fmt::println("\n"
         "Object ID: {}\n"
@@ -926,7 +932,7 @@ int AudioState::handler()
             AL_EVENT_TYPE_BUFFER_COMPLETED_SOFT, AL_EVENT_TYPE_SOURCE_STATE_CHANGED_SOFT,
             AL_EVENT_TYPE_DISCONNECTED_SOFT}};
 
-        EventControlManager(milliseconds &sleep_time)
+        explicit EventControlManager(milliseconds &sleep_time)
         {
             if(alEventControlSOFT)
             {
@@ -1399,7 +1405,7 @@ int AudioState::handler()
                 break;
         }
         if(ALenum err{alGetError()})
-            fmt::println(stderr, "Got AL error: {:#04x} ({})", as_unsigned(err), alGetString(err));
+            fmt::println(stderr, "Got AL error: {:#x} ({})", as_unsigned(err), alGetString(err));
 
         mSrcCond.wait_for(srclock, sleep_time);
     }
@@ -1598,15 +1604,14 @@ int VideoState::handler()
         { pict.mFrame = AVFramePtr{av_frame_alloc()}; });
 
     /* Prefill the codec buffer. */
-    auto packet_sender = [this]()
+    auto sender [[maybe_unused]] = std::async(std::launch::async, [this]()
     {
         while(true)
         {
             const int ret{mQueue.sendPacket(mCodecCtx.get())};
             if(ret == AVErrorEOF) break;
         }
-    };
-    auto sender [[maybe_unused]] = std::async(std::launch::async, packet_sender);
+    });
 
     {
         std::lock_guard<std::mutex> displock{mDispPtsMutex};
@@ -1620,12 +1625,17 @@ int VideoState::handler()
         Picture *vp{&mPictQ[write_idx]};
 
         /* Retrieve video frame. */
-        AVFrame *decoded_frame{vp->mFrame.get()};
-        while(int ret{mQueue.receiveFrame(mCodecCtx.get(), decoded_frame)})
+        auto get_frame = [this](AVFrame *frame) -> AVFrame*
         {
-            if(ret == AVErrorEOF) goto finish;
-            fmt::println(stderr, "Failed to receive frame: {}", ret);
-        }
+            while(int ret{mQueue.receiveFrame(mCodecCtx.get(), frame)})
+            {
+                if(ret == AVErrorEOF) return nullptr;
+                fmt::println(stderr, "Failed to receive frame: {}", ret);
+            }
+            return frame;
+        };
+        auto *decoded_frame = get_frame(vp->mFrame.get());
+        if(!decoded_frame) break;
 
         /* Get the PTS for this frame. */
         if(decoded_frame->best_effort_timestamp != AVNoPtsValue)
@@ -1647,16 +1657,16 @@ int VideoState::handler()
         if(write_idx == mPictQRead.load(std::memory_order_acquire))
         {
             /* Wait until we have space for a new pic */
-            std::unique_lock<std::mutex> lock{mPictQMutex};
-            while(write_idx == mPictQRead.load(std::memory_order_acquire))
-                mPictQCond.wait(lock);
+            auto lock = std::unique_lock{mPictQMutex};
+            mPictQCond.wait(lock, [write_idx,this]() noexcept
+                { return write_idx != mPictQRead.load(std::memory_order_acquire); });
         }
     }
-finish:
+
     mEOS = true;
 
-    std::unique_lock<std::mutex> lock{mPictQMutex};
-    while(!mFinalUpdate) mPictQCond.wait(lock);
+    auto lock = std::unique_lock{mPictQMutex};
+    mPictQCond.wait(lock, [this]() noexcept { return mFinalUpdate.load(); });
 
     return 0;
 }
@@ -1701,7 +1711,7 @@ bool MovieState::prepare()
     /* Dump information about file onto standard error */
     av_dump_format(mFormatCtx.get(), 0, mFilename.c_str(), 0);
 
-    mParseThread = std::thread{std::mem_fn(&MovieState::parse_handler), this};
+    mParseThread = std::thread{&MovieState::parse_handler, this};
 
     std::unique_lock<std::mutex> slock{mStartupMutex};
     while(!mStartupDone) mStartupCond.wait(slock);
@@ -1813,9 +1823,9 @@ int MovieState::parse_handler()
     mClockBase = get_avtime() + milliseconds{750};
 
     if(audio_index >= 0)
-        mAudioThread = std::thread{std::mem_fn(&AudioState::handler), &mAudio};
+        mAudioThread = std::thread{&AudioState::handler, &mAudio};
     if(video_index >= 0)
-        mVideoThread = std::thread{std::mem_fn(&VideoState::handler), &mVideo};
+        mVideoThread = std::thread{&VideoState::handler, &mVideo};
 
     /* Main packet reading/dispatching loop */
     AVPacketPtr packet{av_packet_alloc()};

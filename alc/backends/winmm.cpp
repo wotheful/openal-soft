@@ -36,7 +36,6 @@
 #include <vector>
 #include <string>
 #include <algorithm>
-#include <functional>
 
 #include "alnumeric.h"
 #include "alsem.h"
@@ -44,6 +43,7 @@
 #include "core/device.h"
 #include "core/helpers.h"
 #include "core/logging.h"
+#include "fmt/core.h"
 #include "ringbuffer.h"
 #include "strutils.h"
 #include "vector.h"
@@ -75,14 +75,10 @@ void ProbePlaybackDevices()
         {
             const auto basename = wstr_to_utf8(std::data(WaveCaps.szPname));
 
-            int count{1};
-            std::string newname{basename};
+            auto count = 1;
+            auto newname = basename;
             while(checkName(PlaybackDevices, newname))
-            {
-                newname = basename;
-                newname += " #";
-                newname += std::to_string(++count);
-            }
+                newname = fmt::format("{} #{}", basename, ++count);
             dname = std::move(newname);
 
             TRACE("Got device \"{}\", ID {}", dname, i);
@@ -106,14 +102,10 @@ void ProbeCaptureDevices()
         {
             const auto basename = wstr_to_utf8(std::data(WaveCaps.szPname));
 
-            int count{1};
-            std::string newname{basename};
+            auto count = 1;
+            auto newname = basename;
             while(checkName(CaptureDevices, newname))
-            {
-                newname = basename;
-                newname += " #";
-                newname += std::to_string(++count);
-            }
+                newname = fmt::format("{} #{}", basename, ++count);
             dname = std::move(newname);
 
             TRACE("Got device \"{}\", ID {}", dname, i);
@@ -124,7 +116,7 @@ void ProbeCaptureDevices()
 
 
 struct WinMMPlayback final : public BackendBase {
-    WinMMPlayback(DeviceBase *device) noexcept : BackendBase{device} { }
+    explicit WinMMPlayback(DeviceBase *device) noexcept : BackendBase{device} { }
     ~WinMMPlayback() override;
 
     void CALLBACK waveOutProc(HWAVEOUT device, UINT msg, DWORD_PTR param1, DWORD_PTR param2) noexcept;
@@ -191,7 +183,7 @@ FORCE_ALIGN int WinMMPlayback::mixerProc()
             WAVEHDR &waveHdr = mWaveBuffer[widx];
             if(++widx == mWaveBuffer.size()) widx = 0;
 
-            mDevice->renderSamples(waveHdr.lpData, mDevice->UpdateSize, mFormat.nChannels);
+            mDevice->renderSamples(waveHdr.lpData, mDevice->mUpdateSize, mFormat.nChannels);
             mWritable.fetch_sub(1, std::memory_order_acq_rel);
             waveOutWrite(mOutHdl, &waveHdr, sizeof(WAVEHDR));
         } while(--todo);
@@ -235,7 +227,7 @@ void WinMMPlayback::open(std::string_view name)
         }
         format.nChannels = ((mDevice->FmtChans == DevFmtMono) ? 1 : 2);
         format.nBlockAlign = static_cast<WORD>(format.wBitsPerSample * format.nChannels / 8);
-        format.nSamplesPerSec = mDevice->Frequency;
+        format.nSamplesPerSec = mDevice->mSampleRate;
         format.nAvgBytesPerSec = format.nSamplesPerSec * format.nBlockAlign;
         format.cbSize = 0;
 
@@ -258,11 +250,11 @@ void WinMMPlayback::open(std::string_view name)
 
 bool WinMMPlayback::reset()
 {
-    mDevice->BufferSize = static_cast<uint>(uint64_t{mDevice->BufferSize} *
-        mFormat.nSamplesPerSec / mDevice->Frequency);
-    mDevice->BufferSize = (mDevice->BufferSize+3) & ~0x3u;
-    mDevice->UpdateSize = mDevice->BufferSize / 4;
-    mDevice->Frequency = mFormat.nSamplesPerSec;
+    mDevice->mBufferSize = static_cast<uint>(uint64_t{mDevice->mBufferSize} *
+        mFormat.nSamplesPerSec / mDevice->mSampleRate);
+    mDevice->mBufferSize = (mDevice->mBufferSize+3) & ~0x3u;
+    mDevice->mUpdateSize = mDevice->mBufferSize / 4;
+    mDevice->mSampleRate = mFormat.nSamplesPerSec;
 
     if(mFormat.wFormatTag == WAVE_FORMAT_IEEE_FLOAT)
     {
@@ -303,7 +295,7 @@ bool WinMMPlayback::reset()
     }
     setDefaultWFXChannelOrder();
 
-    const uint BufferSize{mDevice->UpdateSize * mFormat.nChannels * mDevice->bytesFromFmt()};
+    const uint BufferSize{mDevice->mUpdateSize * mFormat.nChannels * mDevice->bytesFromFmt()};
 
     decltype(mBuffer)(BufferSize*mWaveBuffer.size()).swap(mBuffer);
     mWaveBuffer[0] = WAVEHDR{};
@@ -328,7 +320,7 @@ void WinMMPlayback::start()
         mWritable.store(static_cast<uint>(mWaveBuffer.size()), std::memory_order_release);
 
         mKillNow.store(false, std::memory_order_release);
-        mThread = std::thread{std::mem_fn(&WinMMPlayback::mixerProc), this};
+        mThread = std::thread{&WinMMPlayback::mixerProc, this};
     }
     catch(std::exception& e) {
         throw al::backend_exception{al::backend_error::DeviceError,
@@ -351,7 +343,7 @@ void WinMMPlayback::stop()
 
 
 struct WinMMCapture final : public BackendBase {
-    WinMMCapture(DeviceBase *device) noexcept : BackendBase{device} { }
+    explicit WinMMCapture(DeviceBase *device) noexcept : BackendBase{device} { }
     ~WinMMCapture() override;
 
     void CALLBACK waveInProc(HWAVEIN device, UINT msg, DWORD_PTR param1, DWORD_PTR param2) noexcept;
@@ -486,7 +478,7 @@ void WinMMCapture::open(std::string_view name)
     mFormat.nChannels = static_cast<WORD>(mDevice->channelsFromFmt());
     mFormat.wBitsPerSample = static_cast<WORD>(mDevice->bytesFromFmt() * 8);
     mFormat.nBlockAlign = static_cast<WORD>(mFormat.wBitsPerSample * mFormat.nChannels / 8);
-    mFormat.nSamplesPerSec = mDevice->Frequency;
+    mFormat.nSamplesPerSec = mDevice->mSampleRate;
     mFormat.nAvgBytesPerSec = mFormat.nSamplesPerSec * mFormat.nBlockAlign;
     mFormat.cbSize = 0;
 
@@ -502,7 +494,7 @@ void WinMMCapture::open(std::string_view name)
 
     // Allocate circular memory buffer for the captured audio
     // Make sure circular buffer is at least 100ms in size
-    const auto CapturedDataSize = std::max<size_t>(mDevice->BufferSize,
+    const auto CapturedDataSize = std::max<size_t>(mDevice->mBufferSize,
         BufferSize*mWaveBuffer.size());
 
     mRing = RingBuffer::Create(CapturedDataSize, mFormat.nBlockAlign, false);
@@ -531,7 +523,7 @@ void WinMMCapture::start()
         }
 
         mKillNow.store(false, std::memory_order_release);
-        mThread = std::thread{std::mem_fn(&WinMMCapture::captureProc), this};
+        mThread = std::thread{&WinMMCapture::captureProc, this};
 
         waveInStart(mInHdl);
     }
