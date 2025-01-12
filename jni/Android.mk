@@ -5,16 +5,6 @@ include $(CLEAR_VARS)
 LOCAL_CPP_EXTENSION := .cpp
 LOCAL_MODULE    := openal
 LOCAL_SRC_FILES := \
-    common/alcomplex.cpp \
-    common/alassert.cpp \
-    common/alsem.cpp \
-    common/alstring.cpp \
-    common/althrd_setname.cpp \
-    common/dynload.cpp \
-    common/pffft.cpp \
-    common/polyphase_resampler.cpp \
-    common/ringbuffer.cpp \
-    common/strutils.cpp \
     al/auxeffectslot.cpp \
     al/buffer.cpp \
     al/effect.cpp \
@@ -66,9 +56,9 @@ LOCAL_SRC_FILES := \
     alc/backends/opensl.cpp
 #   alc/mixer/mixer_neon.cpp.neon \
     
-LOCAL_CFLAGS := -fPIC -DPIC -fno-exceptions -DANDROID -pipe -integrated-as -fno-plt -O3 -flto=thin -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-invariant-load-hoisting -mllvm -polly-run-inliner -mllvm -polly-run-dce -flto=thin -fwhole-program-vtables
-LOCAL_CXXLAGS := -fPIC -DPIC -fno-exceptions -DANDROID -pipe -integrated-as -fno-plt -O3 -flto=thin -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-invariant-load-hoisting -mllvm -polly-run-inliner -mllvm -polly-run-dce -flto=thin -fwhole-program-vtables
-LOCAL_CPPLAGS := -fPIC -DPIC -fno-exceptions -DANDROID -pipe -integrated-as -fno-plt -O3 -flto=thin -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-invariant-load-hoisting -mllvm -polly-run-inliner -mllvm -polly-run-dce -flto=thin -fwhole-program-vtables
+LOCAL_CFLAGS := -fPIC -DPIC -fno-exceptions -DANDROID -pipe -integrated-as -fno-plt -O3 -flto=thin -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-invariant-load-hoisting -mllvm -polly-run-inliner -mllvm -polly-run-dce -flto=thin -fwhole-program-vtables -DALSOFT_UTILS=ON -DALSOFT_NO_CONFIG_UTIL=ON
+LOCAL_CXXLAGS := -fPIC -DPIC -fno-exceptions -DANDROID -pipe -integrated-as -fno-plt -O3 -flto=thin -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-invariant-load-hoisting -mllvm -polly-run-inliner -mllvm -polly-run-dce -flto=thin -fwhole-program-vtables -DALSOFT_NO_CONFIG_UTIL=ON -DALSOFT_UTILS=ON
+LOCAL_CPPLAGS := -fPIC -DPIC -fno-exceptions -DANDROID -pipe -integrated-as -fno-plt -O3 -flto=thin -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-invariant-load-hoisting -mllvm -polly-run-inliner -mllvm -polly-run-dce -flto=thin -fwhole-program-vtables -DALSOFT_NO_CONFIG_UTIL=ON -DALSOFT_NO_CONFIG_UTIL=ON
 LOCAL_LDLIBS := -fuse-ld=lld -flto=thin -lOpenSLES
 LOCAL_C_INCLUDES := $(LOCAL_PATH)/include $(LOCAL_PATH)/include/AL $(LOCAL_PATH)/al $(LOCAL_PATH)/alc $(LOCAL_PATH)/common $(LOCAL_PATH)/core
 LOCAL_EXPORT_C_INCLUDES := $(LOCAL_PATH)/include
