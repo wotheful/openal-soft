@@ -77,7 +77,6 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
-#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <numeric>
@@ -97,7 +96,9 @@
 #include "alspan.h"
 #include "alstring.h"
 #include "common/alhelpers.h"
+#include "filesystem.h"
 #include "fmt/core.h"
+#include "fmt/std.h"
 
 #include "win_main_utf8.h"
 
@@ -148,7 +149,6 @@ auto LowFrequencyEffectID = ALuint{};
 auto LfeSlotID = ALuint{};
 
 
-namespace fs = std::filesystem;
 using namespace std::string_view_literals;
 
 [[noreturn]]

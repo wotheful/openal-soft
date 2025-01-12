@@ -68,6 +68,7 @@
 #include "core/device.h"
 #include "core/logging.h"
 #include "fmt/core.h"
+#include "fmt/chrono.h"
 #include "ringbuffer.h"
 #include "strutils.h"
 
@@ -1166,6 +1167,7 @@ struct WasapiPlayback final : public BackendBase {
     uint mBufferFilled{0};
     SampleConverterPtr mResampler;
     bool mMonoUpsample{false};
+    bool mExclusiveMode{false};
 
     WAVEFORMATEXTENSIBLE mFormat{};
     std::atomic<UINT32> mPadding{0u};
@@ -1213,6 +1215,8 @@ FORCE_ALIGN void WasapiPlayback::mixerProc(PlainDevice &audio)
     const UINT32 buffer_len{mOutBufferSize};
     const void *resbufferptr{};
 
+    assert(buffer_len > 0);
+
 #ifdef AVRTAPI
     /* TODO: "Audio" or "Pro Audio"? The suggestion is to use "Pro Audio" for
      * device periods less than 10ms, and "Audio" for greater than or equal to
@@ -1226,85 +1230,92 @@ FORCE_ALIGN void WasapiPlayback::mixerProc(PlainDevice &audio)
     mBufferFilled = 0;
     while(!mKillNow.load(std::memory_order_relaxed))
     {
-        UINT32 written{};
-        HRESULT hr{audio.mClient->GetCurrentPadding(&written)};
-        if(FAILED(hr))
+        /* For exclusive mode, assume buffer_len sample frames are writable.
+         * The first pass will be a prefill of the buffer, while subsequent
+         * passes will only occur after notify events.
+         * IAudioClient::GetCurrentPadding shouldn't be used with exclusive
+         * streams that use event notifications, according to the docs, we
+         * should just assume a buffer length is writable after notification.
+         */
+        auto written = UINT32{};
+        if(!mExclusiveMode)
         {
-            ERR("Failed to get padding: {:#x}", as_unsigned(hr));
-            mDevice->handleDisconnect("Failed to retrieve buffer padding: {:#x}",
-                as_unsigned(hr));
-            break;
-        }
-        mPadding.store(written, std::memory_order_relaxed);
-
-        const auto len = uint{buffer_len - written};
-        if(len == 0)
-        {
-            if(prefilling)
+            if(auto hr = audio.mClient->GetCurrentPadding(&written); FAILED(hr))
             {
-                prefilling = false;
-                ResetEvent(mNotifyEvent);
-                hr = audio.mClient->Start();
-                if(FAILED(hr))
-                {
-                    ERR("Failed to start audio client: {:#x}", as_unsigned(hr));
-                    mDevice->handleDisconnect("Failed to start audio client: {:#x}",
-                        as_unsigned(hr));
-                    break;
-                }
+                ERR("Failed to get padding: {:#x}", as_unsigned(hr));
+                mDevice->handleDisconnect("Failed to retrieve buffer padding: {:#x}",
+                    as_unsigned(hr));
+                break;
             }
-
-            if(DWORD res{WaitForSingleObjectEx(mNotifyEvent, 2000, FALSE)}; res != WAIT_OBJECT_0)
-                ERR("WaitForSingleObjectEx error: {:#x}", res);
-            continue;
+            mPadding.store(written, std::memory_order_relaxed);
         }
 
-        BYTE *buffer{};
-        hr = audio.mRender->GetBuffer(len, &buffer);
-        if(SUCCEEDED(hr))
+        if(const auto len = uint{buffer_len - written})
         {
-            if(mResampler)
+            auto buffer = LPBYTE{};
+            auto hr = audio.mRender->GetBuffer(len, &buffer);
+            if(SUCCEEDED(hr))
             {
-                std::lock_guard<std::mutex> dlock{mMutex};
-                auto dst = al::span{buffer, size_t{len}*frame_size};
-                for(UINT32 done{0};done < len;)
+                if(mResampler)
                 {
-                    if(mBufferFilled == 0)
+                    auto dlock = std::lock_guard{mMutex};
+                    auto dst = al::span{buffer, size_t{len}*frame_size};
+                    for(UINT32 done{0};done < len;)
                     {
-                        mDevice->renderSamples(mResampleBuffer.data(), mDevice->mUpdateSize,
-                            mFormat.Format.nChannels);
-                        resbufferptr = mResampleBuffer.data();
-                        mBufferFilled = mDevice->mUpdateSize;
+                        if(mBufferFilled == 0)
+                        {
+                            mDevice->renderSamples(mResampleBuffer.data(), mDevice->mUpdateSize,
+                                mFormat.Format.nChannels);
+                            resbufferptr = mResampleBuffer.data();
+                            mBufferFilled = mDevice->mUpdateSize;
+                        }
+
+                        const auto got = mResampler->convert(&resbufferptr, &mBufferFilled,
+                            dst.data(), len-done);
+                        dst = dst.subspan(size_t{got}*frame_size);
+                        done += got;
                     }
-
-                    uint got{mResampler->convert(&resbufferptr, &mBufferFilled, dst.data(),
-                        len-done)};
-                    dst = dst.subspan(size_t{got}*frame_size);
-                    done += got;
+                    mPadding.store(written + len, std::memory_order_relaxed);
                 }
-                mPadding.store(written + len, std::memory_order_relaxed);
-            }
-            else
-            {
-                std::lock_guard<std::mutex> dlock{mMutex};
-                mDevice->renderSamples(buffer, len, mFormat.Format.nChannels);
-                mPadding.store(written + len, std::memory_order_relaxed);
-            }
+                else
+                {
+                    auto dlock = std::lock_guard{mMutex};
+                    mDevice->renderSamples(buffer, len, mFormat.Format.nChannels);
+                    mPadding.store(written + len, std::memory_order_relaxed);
+                }
 
-            if(mMonoUpsample)
-            {
-                DuplicateSamples(al::span{buffer, size_t{len}*frame_size}, mDevice->FmtType,
-                    mFormat.Format.nChannels);
-            }
+                if(mMonoUpsample)
+                {
+                    DuplicateSamples(al::span{buffer, size_t{len}*frame_size}, mDevice->FmtType,
+                        mFormat.Format.nChannels);
+                }
 
-            hr = audio.mRender->ReleaseBuffer(len, 0);
+                hr = audio.mRender->ReleaseBuffer(len, 0);
+            }
+            if(FAILED(hr))
+            {
+                ERR("Failed to buffer data: {:#x}", as_unsigned(hr));
+                mDevice->handleDisconnect("Failed to send playback samples: {:#x}",
+                    as_unsigned(hr));
+                break;
+            }
         }
-        if(FAILED(hr))
+
+        if(prefilling)
         {
-            ERR("Failed to buffer data: {:#x}", as_unsigned(hr));
-            mDevice->handleDisconnect("Failed to send playback samples: {:#x}", as_unsigned(hr));
-            break;
+            prefilling = false;
+            ResetEvent(mNotifyEvent);
+            if(auto hr = audio.mClient->Start(); FAILED(hr))
+            {
+                ERR("Failed to start audio client: {:#x}", as_unsigned(hr));
+                mDevice->handleDisconnect("Failed to start audio client: {:#x}",
+                    as_unsigned(hr));
+                break;
+            }
         }
+
+        if(DWORD res{WaitForSingleObjectEx(mNotifyEvent, 2000, FALSE)}; res != WAIT_OBJECT_0)
+            ERR("WaitForSingleObjectEx error: {:#x}", res);
     }
     mPadding.store(0u, std::memory_order_release);
     audio.mClient->Stop();
@@ -1930,7 +1941,7 @@ bool WasapiPlayback::reset()
 
     if(FAILED(mProcResult) || mState != ThreadState::Waiting)
         throw al::backend_exception{al::backend_error::DeviceError, "Device init failed: {:#x}",
-                                    as_unsigned(mProcResult)};
+            as_unsigned(mProcResult)};
     return true;
 }
 
@@ -1945,6 +1956,7 @@ auto WasapiPlayback::resetProxy(DeviceHelper &helper, DeviceHandle &mmdev,
 
     mDevice->Flags.reset(Virtualization);
     mMonoUpsample = false;
+    mExclusiveMode = false;
 
     auto &audio = audiodev.emplace<PlainDevice>();
     auto hr = helper.activateAudioClient(mmdev, __uuidof(IAudioClient),
@@ -2095,6 +2107,7 @@ auto WasapiPlayback::resetProxy(DeviceHelper &helper, DeviceHandle &mmdev,
     const auto sharemode =
         GetConfigValueBool(mDevice->mDeviceName, "wasapi", "exclusive-mode", false)
         ? AUDCLNT_SHAREMODE_EXCLUSIVE : AUDCLNT_SHAREMODE_SHARED;
+    mExclusiveMode = (sharemode == AUDCLNT_SHAREMODE_EXCLUSIVE);
 
     TraceFormat("Requesting playback format", &OutputType.Format);
     hr = audio.mClient->IsFormatSupported(sharemode, &OutputType.Format, al::out_ptr(wfx));
@@ -2156,18 +2169,40 @@ auto WasapiPlayback::resetProxy(DeviceHelper &helper, DeviceHandle &mmdev,
 
     if(sharemode == AUDCLNT_SHAREMODE_EXCLUSIVE)
     {
+        auto period_time = per_time;
+        auto min_period = ReferenceTime{};
+        hr = audio.mClient->GetDevicePeriod(nullptr,
+            &reinterpret_cast<REFERENCE_TIME&>(min_period));
+        if(FAILED(hr))
+            ERR("Failed to get minimum period time: {:#x}", as_unsigned(hr));
+        else if(min_period > period_time)
+        {
+            period_time = min_period;
+            WARN("Clamping to minimum period time, {}", nanoseconds{min_period});
+        }
+
         hr = audio.mClient->Initialize(sharemode, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-            per_time.count(), per_time.count(), &OutputType.Format, nullptr);
+            period_time.count(), period_time.count(), &OutputType.Format, nullptr);
         if(hr == AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED)
         {
             auto newsize = UINT32{};
             hr = audio.mClient->GetBufferSize(&newsize);
             if(SUCCEEDED(hr))
             {
-                const auto newper = ReferenceTime{seconds{newsize}}
+                period_time = ReferenceTime{seconds{newsize}}
                     / OutputType.Format.nSamplesPerSec;
+                WARN("Adjusting to supported period time, {}", nanoseconds{period_time});
+
+                audio.mClient = nullptr;
+                hr = helper.activateAudioClient(mmdev, __uuidof(IAudioClient),
+                    al::out_ptr(audio.mClient));
+                if(FAILED(hr))
+                {
+                    ERR("Failed to reactivate audio client: {:#x}", as_unsigned(hr));
+                    return hr;
+                }
                 hr = audio.mClient->Initialize(sharemode, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-                    newper.count(), newper.count(), &OutputType.Format, nullptr);
+                    period_time.count(), period_time.count(), &OutputType.Format, nullptr);
             }
         }
     }
@@ -2218,8 +2253,7 @@ auto WasapiPlayback::resetProxy(DeviceHelper &helper, DeviceHandle &mmdev,
     }
     else
     {
-        mOutUpdateSize = std::min(RefTime2Samples(period_time, mFormat.Format.nSamplesPerSec),
-            buffer_len/2u);
+        mOutUpdateSize = RefTime2Samples(period_time, mFormat.Format.nSamplesPerSec);
 
         mDevice->mBufferSize = static_cast<uint>(uint64_t{buffer_len} * mDevice->mSampleRate /
             mFormat.Format.nSamplesPerSec);
@@ -2306,9 +2340,6 @@ struct WasapiCapture final : public BackendBase {
         -> HRESULT;
     auto resetProxy(DeviceHelper &helper, DeviceHandle &mmdev, ComPtr<IAudioClient> &client,
         ComPtr<IAudioCaptureClient> &capture) -> HRESULT;
-    void closeProxy();
-    HRESULT startProxy();
-    void stopProxy();
 
     void open(std::string_view name) override;
     void start() override;

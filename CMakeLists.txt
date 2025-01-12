@@ -100,7 +100,7 @@ include(GNUInstallDirs)
 find_package(PkgConfig)
 find_package(SDL3 QUIET)
 
-add_subdirectory(fmt-11.0.2 EXCLUDE_FROM_ALL)
+add_subdirectory(fmt-11.1.1 EXCLUDE_FROM_ALL)
 
 option(ALSOFT_DLOPEN  "Check for the dlopen API for loading optional libs"  ON)
 
@@ -183,7 +183,7 @@ endif()
 
 set(LIB_MAJOR_VERSION "1")
 set(LIB_MINOR_VERSION "24")
-set(LIB_REVISION "1")
+set(LIB_REVISION "2")
 set(LIB_VERSION "${LIB_MAJOR_VERSION}.${LIB_MINOR_VERSION}.${LIB_REVISION}")
 set(LIB_VERSION_NUM ${LIB_MAJOR_VERSION},${LIB_MINOR_VERSION},${LIB_REVISION},0)
 
@@ -610,6 +610,8 @@ set(COMMON_OBJS
     common/comptr.h
     common/dynload.cpp
     common/dynload.h
+    common/filesystem.cpp
+    common/filesystem.h
     common/flexarray.h
     common/intrusive_ptr.h
     common/opthelpers.h
