@@ -80,7 +80,8 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
         ./al
         ./alc
         ./common
-        ./core)
+        ./core
+        ./fmt-11.1.4/include)
 
 target_link_libraries(${CMAKE_PROJECT_NAME}
         OpenSLES)
