@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.31.5)
 
-project("mobileglues")
+project("openal")
 
 enable_language(C)
 enable_language(CXX)
@@ -20,134 +20,65 @@ set(CMAKE_ANDROID_LD "lld")
 
 set(CMAKE_BUILD_TYPE Release)
 
-set(PROFILING OFF)
-
-
-find_library(GLSLANG_LIB glslang PATHS ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/)
-
 add_library(${CMAKE_PROJECT_NAME} SHARED
-        init.cpp
-        main.cpp
-        gl/gl_stub.cpp
-        gl/gl_native.cpp
-        gl/gl.cpp
-        gl/envvars.cpp
-        gl/log.cpp
-        gl/program.cpp
-        gl/shader.cpp
-        gl/framebuffer.cpp
-        gl/texture.cpp
-        gl/drawing.cpp
-        gl/multidraw.cpp
-        gl/mg.cpp
-        gl/buffer.cpp
-        gl/getter.cpp
-        gl/pixel.cpp
-        gl/glsl/glsl_for_es.cpp
-        gl/glsl/cache.cpp
-        gl/glsl/preConvertedGlsl.cpp
-        gl/vertexattrib.cpp
-        gl/wrap/legacy_extensions.cpp
-        glx/lookup.cpp
-        egl/egl.c
-        egl/loader.cpp
-        gles/loader.cpp
-        config/cJSON.c
-        config/config.cpp
-        config/gpu_utils.cpp
-        config/settings.cpp
-        gl/dsa/buffer.cpp
-        gl/dsa/framebuffer.cpp
-        gl/fpe/fpe.cpp
-        gl/fpe/state.cpp
-        gl/fpe/transformation.cpp
-        gl/fpe/vertexpointer.cpp
-        gl/fpe/fpe_shadergen.cpp
-        gl/fpe/list.cpp
-        gl/fpe/pointer_utils.cpp
-        gl/fpe/drawing1x.cpp
-        gl/fpe/vertexpointer_utils.cpp
-        gl/fpe/drawstate1x.cpp
-        gl/fpe/glstate.cpp
-        gl/fpe/vertexpointerarray.cpp
-)
+    al/auxeffectslot.cpp
+    al/buffer.cpp
+    al/debug.cpp
+    al/effect.cpp
+    al/effects/autowah.cpp
+    al/effects/chorus.cpp
+    al/effects/compressor.cpp
+    al/effects/convolution.cpp
+    al/effects/dedicated.cpp
+    al/effects/distortion.cpp
+    al/effects/echo.cpp
+    al/effects/effects.cpp
+    al/effects/equalizer.cpp
+    al/effects/fshifter.cpp
+    al/effects/modulator.cpp
+    al/effects/null.cpp
+    al/effects/pshifter.cpp
+    al/effects/reverb.cpp
+    al/effects/vmorpher.cpp
+    al/error.cpp
+    al/event.cpp
+    al/extension.cpp
+    al/filter.cpp
+    al/listener.cpp
+    al/source.cpp
+    al/state.cpp
+    alc/alc.cpp
+    alc/alu.cpp
+    alc/alconfig.cpp
+    alc/context.cpp
+    alc/device.cpp
+    alc/effects/autowah.cpp
+    alc/effects/chorus.cpp
+    alc/effects/compressor.cpp
+    alc/effects/convolution.cpp
+    alc/effects/dedicated.cpp
+    alc/effects/distortion.cpp
+    alc/effects/echo.cpp
+    alc/effects/equalizer.cpp
+    alc/effects/fshifter.cpp
+    alc/effects/modulator.cpp
+    alc/effects/null.cpp
+    alc/effects/pshifter.cpp
+    alc/effects/reverb.cpp
+    alc/effects/vmorpher.cpp
+    alc/events.cpp
+    alc/panning.cpp)
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
-        ./includes
-        ./glm
-        ./3rdparty/xxhash)
+        ./include
+        ./include/AL
+        ./al
+        ./alc
+        ./common
+        ./core)
 
 target_link_libraries(${CMAKE_PROJECT_NAME}
-        ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libglslang.a
-        ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libspirv-cross-c-shared.so
-        ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libshaderconv.so
-        ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libGenericCodeGen.a
-        ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libglslang-default-resource-limits.a
-        ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libMachineIndependent.a
-        ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libOSDependent.a
-        ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libSPIRV-Tools-diff.a
-        ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libSPIRV-Tools-link.a
-        ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libSPIRV-Tools-lint.a
-        ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libSPIRV-Tools-opt.a
-        ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libSPIRV-Tools-reduce.a
-        ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libSPIRV-Tools.a
-        ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libSPIRV.a
-        ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libSPVRemapper.a
-        android
-        log
-        EGL
-)
+        OpenSLES)
 
-target_include_directories(mobileglues PUBLIC
-        ${CMAKE_SOURCE_DIR}/include
-        )
-
-if (PROFILING)
-        find_package(Threads)
-        include_directories(${CMAKE_SOURCE_DIR}/3rdparty/perfetto/sdk)
-        add_library(perfetto STATIC ${CMAKE_SOURCE_DIR}/3rdparty/perfetto/sdk/perfetto.cc)
-        target_link_libraries(mobileglues perfetto ${CMAKE_THREAD_LIBS_INIT})
-        target_compile_definitions(mobileglues PUBLIC PROFILING=1)
-endif()
-
-if (MOBILEGLUES_TEST)
-        # Tests
-        find_package(googletest REQUIRED CONFIG)
-        find_package(junit-gtest REQUIRED CONFIG)
-
-        add_library(${CMAKE_PROJECT_NAME}_tests SHARED
-                        tests/sanitycheck_test.cpp
-                        tests/fpe/vertexpointer_test.cpp
-        )
-
-        target_include_directories(${CMAKE_PROJECT_NAME}_tests PUBLIC
-                ${CMAKE_SOURCE_DIR}/include
-        )
-
-        target_link_libraries(${CMAKE_PROJECT_NAME}_tests
-                PRIVATE
-                googletest::gtest
-                junit-gtest::junit-gtest
-                $<TARGET_OBJECTS:${CMAKE_PROJECT_NAME}>
-        )
-        target_link_libraries(${CMAKE_PROJECT_NAME}_tests PRIVATE
-                ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libglslang.a
-                ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libspirv-cross-c-shared.so
-#                ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libshaderconv.so
-                ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libGenericCodeGen.a
-                ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libglslang-default-resource-limits.a
-                ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libMachineIndependent.a
-                ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libOSDependent.a
-                ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libSPIRV-Tools-diff.a
-                ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libSPIRV-Tools-link.a
-                ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libSPIRV-Tools-lint.a
-                ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libSPIRV-Tools-opt.a
-                ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libSPIRV-Tools-reduce.a
-                ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libSPIRV-Tools.a
-                ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libSPIRV.a
-                ${CMAKE_SOURCE_DIR}/libraries/${ANDROID_ABI}/libSPVRemapper.a
-                android
-                log
-                EGL
-        )
-endif()
+target_include_directories(openal PUBLIC
+        ${CMAKE_SOURCE_DIR}/include)
