@@ -74,6 +74,7 @@ add_library(${CMAKE_PROJECT_NAME} SHARED
     alc/panning.cpp)
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
+        ./
         ./include
         ./include/AL
         ./al
