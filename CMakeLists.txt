@@ -606,6 +606,16 @@ endif()
 # Common sources used by both the OpenAL implementation library, the OpenAL
 # router, and certain tools and examples.
 set(COMMON_OBJS
+    common/alcomplex.cpp
+    common/alassert.cpp
+    common/alsem.cpp
+    common/alstring.cpp
+    common/althrd_setname.cpp
+    common/dynload.cpp
+    common/pffft.cpp
+    common/polyphase_resampler.cpp
+    common/ringbuffer.cpp
+    common/strutils.cpp
     common/albit.h
     common/alcomplex.h
     common/almalloc.h
@@ -633,64 +643,38 @@ set(COMMON_OBJS
 set(CORE_OBJS
     core/ambdec.cpp
     core/ambdec.h
-    core/ambidefs.cpp
     core/ambidefs.h
     core/async_event.h
-    core/bformatdec.cpp
     core/bformatdec.h
-    core/bs2b.cpp
     core/bs2b.h
     core/bsinc_defs.h
-    core/bsinc_tables.cpp
     core/bsinc_tables.h
     core/bufferline.h
-    core/buffer_storage.cpp
     core/buffer_storage.h
-    core/context.cpp
     core/context.h
-    core/converter.cpp
     core/converter.h
-    core/cpu_caps.cpp
     core/cpu_caps.h
     core/cubic_defs.h
-    core/cubic_tables.cpp
     core/cubic_tables.h
-    core/devformat.cpp
     core/devformat.h
-    core/device.cpp
     core/device.h
     core/effects/base.h
-    core/effectslot.cpp
     core/effectslot.h
-    core/except.cpp
     core/except.h
     core/filters/biquad.h
-    core/filters/biquad.cpp
-    core/filters/nfc.cpp
     core/filters/nfc.h
-    core/filters/splitter.cpp
     core/filters/splitter.h
     core/fmt_traits.h
-    core/fpu_ctrl.cpp
     core/fpu_ctrl.h
     core/front_stablizer.h
-    core/helpers.cpp
     core/helpers.h
-    core/hrtf.cpp
     core/hrtf.h
-    core/logging.cpp
     core/logging.h
-    core/mastering.cpp
     core/mastering.h
-    core/mixer.cpp
     core/mixer.h
     core/resampler_limits.h
-    core/storage_formats.cpp
     core/storage_formats.h
-    core/uhjfilter.cpp
     core/uhjfilter.h
-    core/uiddefs.cpp
-    core/voice.cpp
     core/voice.h
     core/voice_change.h)
 
@@ -772,7 +756,6 @@ set(OPENAL_OBJS
     al/error.cpp
     al/event.cpp
     al/event.h
-    al/extension.cpp
     al/filter.cpp
     al/filter.h
     al/listener.cpp
