@@ -1506,12 +1506,6 @@ else()
         endif()
     endif()
 
-    if(NOT WIN32 AND NOT APPLE)
-        # FIXME: This doesn't put a dependency on the version script. Changing
-        # the version script will not cause a relink as it should.
-        target_link_options(${IMPL_TARGET} PRIVATE
-            "-Wl,--version-script=${OpenAL_SOURCE_DIR}/libopenal.version")
-    endif()
 
     if(APPLE AND ALSOFT_OSX_FRAMEWORK)
         # Sets framework name to soft_oal to avoid ambiguity with the system OpenAL.framework
