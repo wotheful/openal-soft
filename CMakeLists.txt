@@ -66,6 +66,11 @@ add_library(${CMAKE_PROJECT_NAME} SHARED
     alc/effects/pshifter.cpp
     alc/effects/reverb.cpp
     alc/effects/vmorpher.cpp
+    alc/backends/base.cpp
+    alc/backends/loopback.cpp
+    alc/backends/null.cpp
+    alc/backends/oboe.cpp
+    alc/backends/opensl.cpp
     alc/events.cpp
     alc/panning.cpp)
 
