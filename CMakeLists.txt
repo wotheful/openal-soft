@@ -108,11 +108,8 @@ target_include_directories(openal PRIVATE
          ${CMAKE_CURRENT_SOURCE_DIR}/al
          ${CMAKE_CURRENT_SOURCE_DIR}/alc
          ${CMAKE_CURRENT_SOURCE_DIR}/common
-         ${CMAKE_CURRENT_SOURCE_DIR}/core)
+         ${CMAKE_CURRENT_SOURCE_DIR}/core
+         ${CMAKE_CURRENT_SOURCE_DIR}/fmt-11.1.4/include)
 
 target_include_directories(openal INTERFACE
          ${CMAKE_CURRENT_SOURCE_DIR}/include)
-
-
-target_include_directories(openal STATIC
-         ${CMAKE_CURRENT_SOURCE_DIR}/fmt-11.1.4/include)
