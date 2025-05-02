@@ -18,9 +18,7 @@ LOCAL_SRC_FILES := \
     alc/alc.cpp \
     alc/alu.cpp \
     alc/alconfig.cpp \
-    alc/ambdec.cpp \
     alc/bformatdec.cpp \
-    alc/bs2b.cpp \
     alc/bsinc_tables.cpp \
     alc/buffer_storage.cpp \
     alc/converter.cpp \
@@ -49,17 +47,13 @@ LOCAL_SRC_FILES := \
     alc/uhjfilter.cpp \
     alc/uiddefs.cpp \
     alc/voice.cpp \
-    alc/backends/base.cpp \
-    alc/backends/loopback.cpp \
-    alc/backends/null.cpp \
     alc/backends/oboe.cpp \
     alc/backends/opensl.cpp
 #   alc/mixer/mixer_neon.cpp.neon \
     
-LOCAL_CFLAGS := -fPIC -DPIC -fno-exceptions -DANDROID -pipe -integrated-as -fno-plt -O3 -flto=thin -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-invariant-load-hoisting -mllvm -polly-run-inliner -mllvm -polly-run-dce -flto=thin -fwhole-program-vtables -DALSOFT_UTILS=ON -DALSOFT_NO_CONFIG_UTIL=ON
-LOCAL_CXXLAGS := -fPIC -DPIC -fno-exceptions -DANDROID -pipe -integrated-as -fno-plt -O3 -flto=thin -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-invariant-load-hoisting -mllvm -polly-run-inliner -mllvm -polly-run-dce -flto=thin -fwhole-program-vtables -DALSOFT_NO_CONFIG_UTIL=ON -DALSOFT_UTILS=ON
-LOCAL_CPPLAGS := -fPIC -DPIC -fno-exceptions -DANDROID -pipe -integrated-as -fno-plt -O3 -flto=thin -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-invariant-load-hoisting -mllvm -polly-run-inliner -mllvm -polly-run-dce -flto=thin -fwhole-program-vtables -DALSOFT_NO_CONFIG_UTIL=ON -DALSOFT_NO_CONFIG_UTIL=ON
-LOCAL_LDLIBS := -fuse-ld=lld -flto=thin -lOpenSLES
+LOCAL_CFLAGS := -fno-plt -O3 -pipe -integrated-as -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-invariant-load-hoisting -mllvm -polly-run-inliner -mllvm -polly-run-dce -mllvm -polly-invariant-load-hoisting -flto=thin -mllvm -polly-run-inliner -mllvm -polly-run-dce -mllvm -polly-parallel -mllvm -polly-scheduling=dynamic -flto=thin -fno-emulated-tls -fwhole-program-vtables -fdata-sections -ffunction-sections -fmerge-all-constants -mllvm -polly-detect-keep-going -mllvm -polly-ast-use-context -march=armv8-a+simd -fPIC -DPIC -std=c17
+LOCAL_CPPLAGS := -fno-exceptions -fno-plt -O3 -pipe -integrated-as -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-invariant-load-hoisting -mllvm -polly-run-inliner -mllvm -polly-run-dce -mllvm -polly-invariant-load-hoisting -flto=thin -mllvm -polly-run-inliner -mllvm -polly-run-dce -mllvm -polly-parallel -mllvm -polly-scheduling=dynamic -flto=thin -fno-emulated-tls -fwhole-program-vtables -fdata-sections -ffunction-sections -fmerge-all-constants -mllvm -polly-detect-keep-going -mllvm -polly-ast-use-context -march=armv8-a+simd -fPIC -DPIC -std=c++20
+LOCAL_LDLIBS := -fuse-ld=lld -flto=thin -Wl,-plugin-opt=-emulated-tls=0 -lOpenSLES
 LOCAL_C_INCLUDES := $(LOCAL_PATH)/include $(LOCAL_PATH)/include/AL $(LOCAL_PATH)/al $(LOCAL_PATH)/alc $(LOCAL_PATH)/common $(LOCAL_PATH)/core
 LOCAL_EXPORT_C_INCLUDES := $(LOCAL_PATH)/include
 
