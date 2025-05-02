@@ -7,7 +7,7 @@
 #define HAVE_PTHREAD_SET_NAME_NP 1
 #define HAVE_CPUID_H 1
 #define HAVE_GUIDDEF_H 1
-#define HAVE_INTRIN_H 1
+#define HAVE_INTRIN_H 0
 #define HAVE_PTHREAD_NP_H 1
 #define HAVE_DLFCN_H 1
 
