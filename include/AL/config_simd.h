@@ -7,4 +7,4 @@
 #define HAVE_SSE_INTRINSICS 0
 
 /* Define to 1 if we have ARM Neon CPU extensions, else 0 */
-#define HAVE_NEON 1
+#define HAVE_NEON 0
