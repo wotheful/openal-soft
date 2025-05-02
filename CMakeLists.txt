@@ -7,7 +7,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -pipe -integrated-as -mllvm -polly -
 set(LINK_OPTIONS "${CMAKE_LINK_OPTIONS} -fuse-ld=lld -flto=thin -Wl,-plugin-opt=-emulated-tls=0")
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_LINK_OPTIONS} -fuse-ld=lld -flto=thin -Wl,-plugin-opt=-emulated-tls=0")
 set(CMAKE_ANDROID_STL_TYPE system)
-set(CMAKE_ANDROID_LD "lld")
+set(CMAKE_ANDROID_LD "ld")
 
 if(APPLE)
     # The workaround for try_compile failing with code signing
