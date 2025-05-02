@@ -1,7 +1,5 @@
 /*
  * An example showing how to play a stream sync'd to video, using ffmpeg.
- *
- * Requires C++14.
  */
 
 #include <algorithm>
@@ -21,18 +19,29 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <numbers>
 #include <ratio>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
 
-#ifdef __GNUC__
-_Pragma("GCC diagnostic push")
-_Pragma("GCC diagnostic ignored \"-Wconversion\"")
-_Pragma("GCC diagnostic ignored \"-Wold-style-cast\"")
-#endif
+#include "AL/alc.h"
+#include "AL/al.h"
+#include "AL/alext.h"
+
+#include "almalloc.h"
+#include "alnumeric.h"
+#include "common/alhelpers.h"
+#include "fmt/core.h"
+#include "fmt/format.h"
+#include "pragmadefs.h"
+
+DIAGNOSTIC_PUSH
+std_pragma("GCC diagnostic ignored \"-Wconversion\"")
+std_pragma("GCC diagnostic ignored \"-Wold-style-cast\"")
 extern "C" {
 #include "libavcodec/avcodec.h"
 #include "libavformat/avformat.h"
@@ -50,29 +59,29 @@ extern "C" {
 #include "libswresample/swresample.h"
 
 struct SwsContext;
-}
+} /* extern "C" */
 
 #define SDL_MAIN_HANDLED
 #include "SDL3/SDL_events.h"
 #include "SDL3/SDL_main.h"
 #include "SDL3/SDL_render.h"
 #include "SDL3/SDL_video.h"
-#ifdef __GNUC__
-_Pragma("GCC diagnostic pop")
-#endif
 
-#include "AL/alc.h"
-#include "AL/al.h"
-#include "AL/alext.h"
+namespace {
 
-#include "almalloc.h"
-#include "alnumbers.h"
-#include "alnumeric.h"
-#include "alspan.h"
-#include "common/alhelpers.h"
-#include "fmt/core.h"
-#include "fmt/format.h"
+[[nodiscard]]
+constexpr auto DefineSDLColorspace(SDL_ColorType type, SDL_ColorRange range,
+    SDL_ColorPrimaries primaries, SDL_TransferCharacteristics transfer,
+    SDL_MatrixCoefficients matrix, SDL_ChromaLocation chromaloc) noexcept
+{
+    return SDL_DEFINE_COLORSPACE(type, range, primaries, transfer, matrix, chromaloc);
+}
 
+constexpr auto AVNoPtsValue = AV_NOPTS_VALUE;
+constexpr auto AVErrorEOF = AVERROR_EOF;
+
+} /* namespace */
+DIAGNOSTIC_POP
 
 namespace {
 
@@ -85,44 +94,36 @@ using seconds = std::chrono::seconds;
 using seconds_d64 = std::chrono::duration<double>;
 using std::chrono::duration_cast;
 
-#ifdef __GNUC__
-_Pragma("GCC diagnostic push")
-_Pragma("GCC diagnostic ignored \"-Wold-style-cast\"")
-#endif
-constexpr auto AVNoPtsValue = AV_NOPTS_VALUE;
-constexpr auto AVErrorEOF = AVERROR_EOF;
-#ifdef __GNUC__
-_Pragma("GCC diagnostic pop")
-#endif
 
-const std::string AppName{"alffplay"};
+const auto AppName = std::string{"alffplay"};
 
-ALenum DirectOutMode{AL_FALSE};
-bool EnableWideStereo{false};
-bool EnableUhj{false};
-bool EnableSuperStereo{false};
-bool DisableVideo{false};
-LPALGETSOURCEI64VSOFT alGetSourcei64vSOFT;
-LPALCGETINTEGER64VSOFT alcGetInteger64vSOFT;
-LPALEVENTCONTROLSOFT alEventControlSOFT;
-LPALEVENTCALLBACKSOFT alEventCallbackSOFT;
+auto DirectOutMode = ALenum{AL_FALSE};
+auto EnableWideStereo = false;
+auto EnableUhj = false;
+auto EnableSuperStereo = false;
+auto DisableVideo = false;
+auto alGetSourcei64vSOFT = LPALGETSOURCEI64VSOFT{};
+auto alEventControlSOFT = LPALEVENTCONTROLSOFT{};
+auto alEventCallbackSOFT = LPALEVENTCALLBACKSOFT{};
 
-LPALBUFFERCALLBACKSOFT alBufferCallbackSOFT;
+auto alBufferCallbackSOFT = LPALBUFFERCALLBACKSOFT{};
 
-const seconds AVNoSyncThreshold{10};
+constexpr auto AVNoSyncThreshold = seconds{10};
 
-#define VIDEO_PICTURE_QUEUE_SIZE 24
+constexpr auto VideoPictureQueueSize = 24;
 
-const seconds_d64 AudioSyncThreshold{0.03};
-const milliseconds AudioSampleCorrectionMax{50};
+constexpr auto AudioSyncThreshold = seconds_d64{0.03};
+constexpr auto AudioSampleCorrectionMax = milliseconds{50};
 /* Averaging filter coefficient for audio sync. */
-#define AUDIO_DIFF_AVG_NB 20
-const double AudioAvgFilterCoeff{std::pow(0.01, 1.0/AUDIO_DIFF_AVG_NB)};
+constexpr auto AudioDiffAvgNB = 20.0;
+const auto AudioAvgFilterCoeff = std::pow(0.01, 1.0/AudioDiffAvgNB);
+
 /* Per-buffer size, in time */
-constexpr milliseconds AudioBufferTime{20};
+constexpr auto AudioBufferTime = milliseconds{20};
 /* Buffer total size, in time (should be divisible by the buffer time) */
-constexpr milliseconds AudioBufferTotalTime{800};
+constexpr auto AudioBufferTotalTime = milliseconds{800};
 constexpr auto AudioBufferCount = AudioBufferTotalTime / AudioBufferTime;
+
 
 enum {
     FF_MOVIE_DONE_EVENT = SDL_EVENT_USER
@@ -177,6 +178,57 @@ struct SwsContextDeleter {
 using SwsContextPtr = std::unique_ptr<SwsContext,SwsContextDeleter>;
 
 
+struct SDLProps {
+    SDL_PropertiesID mProperties{};
+
+    SDLProps() : mProperties{SDL_CreateProperties()} { }
+    ~SDLProps() { SDL_DestroyProperties(mProperties); }
+
+    SDLProps(const SDLProps&) = delete;
+    auto operator=(const SDLProps&) -> SDLProps& = delete;
+
+    [[nodiscard]]
+    auto getid() const noexcept -> SDL_PropertiesID { return mProperties; }
+
+    auto setPointer(const char *name, void *value) const
+    { return SDL_SetPointerProperty(mProperties, name, value); }
+
+    auto setString(const char *name, const char *value) const
+    { return SDL_SetStringProperty(mProperties, name, value); }
+
+    auto setInt(const char *name, Sint64 value) const
+    { return SDL_SetNumberProperty(mProperties, name, value); }
+};
+
+struct TextureFormatEntry {
+    AVPixelFormat avformat;
+    SDL_PixelFormat sdlformat;
+};
+constexpr auto TextureFormatMap = std::array{
+    TextureFormatEntry{AV_PIX_FMT_RGB8,           SDL_PIXELFORMAT_RGB332},
+    TextureFormatEntry{AV_PIX_FMT_RGB444,         SDL_PIXELFORMAT_XRGB4444},
+    TextureFormatEntry{AV_PIX_FMT_RGB555,         SDL_PIXELFORMAT_XRGB1555},
+    TextureFormatEntry{AV_PIX_FMT_BGR555,         SDL_PIXELFORMAT_XBGR1555},
+    TextureFormatEntry{AV_PIX_FMT_RGB565,         SDL_PIXELFORMAT_RGB565},
+    TextureFormatEntry{AV_PIX_FMT_BGR565,         SDL_PIXELFORMAT_BGR565},
+    TextureFormatEntry{AV_PIX_FMT_RGB24,          SDL_PIXELFORMAT_RGB24},
+    TextureFormatEntry{AV_PIX_FMT_BGR24,          SDL_PIXELFORMAT_BGR24},
+    TextureFormatEntry{AV_PIX_FMT_0RGB32,         SDL_PIXELFORMAT_XRGB8888},
+    TextureFormatEntry{AV_PIX_FMT_0BGR32,         SDL_PIXELFORMAT_XBGR8888},
+    TextureFormatEntry{AV_PIX_FMT_NE(RGB0, 0BGR), SDL_PIXELFORMAT_RGBX8888},
+    TextureFormatEntry{AV_PIX_FMT_NE(BGR0, 0RGB), SDL_PIXELFORMAT_BGRX8888},
+    TextureFormatEntry{AV_PIX_FMT_RGB32,          SDL_PIXELFORMAT_ARGB8888},
+    TextureFormatEntry{AV_PIX_FMT_RGB32_1,        SDL_PIXELFORMAT_RGBA8888},
+    TextureFormatEntry{AV_PIX_FMT_BGR32,          SDL_PIXELFORMAT_ABGR8888},
+    TextureFormatEntry{AV_PIX_FMT_BGR32_1,        SDL_PIXELFORMAT_BGRA8888},
+    TextureFormatEntry{AV_PIX_FMT_YUV420P,        SDL_PIXELFORMAT_IYUV},
+    TextureFormatEntry{AV_PIX_FMT_YUYV422,        SDL_PIXELFORMAT_YUY2},
+    TextureFormatEntry{AV_PIX_FMT_UYVY422,        SDL_PIXELFORMAT_UYVY},
+    TextureFormatEntry{AV_PIX_FMT_NV12,           SDL_PIXELFORMAT_NV12},
+    TextureFormatEntry{AV_PIX_FMT_NV21,           SDL_PIXELFORMAT_NV21},
+};
+
+
 struct ChannelLayout : public AVChannelLayout {
     ChannelLayout() : AVChannelLayout{} { }
     ChannelLayout(const ChannelLayout &rhs) : AVChannelLayout{}
@@ -198,11 +250,10 @@ class DataQueue {
     size_t mTotalSize{0};
     bool mFinished{false};
 
-    AVPacketPtr getPacket()
+    auto getPacket() -> AVPacketPtr
     {
-        std::unique_lock<std::mutex> plock{mPacketMutex};
-        while(mPackets.empty() && !mFinished)
-            mPacketCond.wait(plock);
+        auto plock = std::unique_lock{mPacketMutex};
+        mPacketCond.wait(plock, [this] { return !mPackets.empty() || mFinished; });
         if(mPackets.empty())
             return nullptr;
 
@@ -217,15 +268,17 @@ public:
 
     int sendPacket(AVCodecContext *codecctx)
     {
-        auto packet = AVPacketPtr{getPacket()};
+        auto packet = getPacket();
 
         auto ret = int{};
         {
             auto flock = std::unique_lock{mFrameMutex};
-            mInFrameCond.wait(flock, [codecctx,pkt=packet.get(),&ret]()
+            mInFrameCond.wait(flock, [this,codecctx,pkt=packet.get(),&ret]
             {
                 ret = avcodec_send_packet(codecctx, pkt);
-                return ret != AVERROR(EAGAIN);
+                if(ret != AVERROR(EAGAIN)) return true;
+                mOutFrameCond.notify_one();
+                return false;
             });
         }
         mOutFrameCond.notify_one();
@@ -246,10 +299,12 @@ public:
         auto ret = int{};
         {
             auto flock = std::unique_lock{mFrameMutex};
-            mOutFrameCond.wait(flock, [codecctx,frame,&ret]()
+            mOutFrameCond.wait(flock, [this,codecctx,frame,&ret]
             {
                 ret = avcodec_receive_frame(codecctx, frame);
-                return ret != AVERROR(EAGAIN);
+                if(ret != AVERROR(EAGAIN)) return true;
+                mInFrameCond.notify_one();
+                return false;
             });
         }
         mInFrameCond.notify_one();
@@ -259,7 +314,7 @@ public:
     void setFinished()
     {
         {
-            std::lock_guard<std::mutex> packetlock{mPacketMutex};
+            auto plock = std::lock_guard{mPacketMutex};
             mFinished = true;
         }
         mPacketCond.notify_one();
@@ -268,7 +323,7 @@ public:
     void flush()
     {
         {
-            std::lock_guard<std::mutex> packetlock{mPacketMutex};
+            auto plock = std::lock_guard{mPacketMutex};
             mFinished = true;
 
             mPackets.clear();
@@ -277,21 +332,18 @@ public:
         mPacketCond.notify_one();
     }
 
-    bool put(const AVPacket *pkt)
+    auto put(const AVPacket *pkt) -> bool
     {
         {
-            std::lock_guard<std::mutex> packet_lock{mPacketMutex};
+            auto plock = std::lock_guard{mPacketMutex};
             if(mTotalSize >= mSizeLimit || mFinished)
                 return false;
 
-            mPackets.push_back(AVPacketPtr{av_packet_alloc()});
-            if(av_packet_ref(mPackets.back().get(), pkt) != 0)
-            {
+            auto *newpkt = mPackets.emplace_back(AVPacketPtr{av_packet_alloc()}).get();
+            if(av_packet_ref(newpkt, pkt) == 0)
+                mTotalSize += static_cast<unsigned int>(newpkt->size);
+            else
                 mPackets.pop_back();
-                return true;
-            }
-
-            mTotalSize += static_cast<unsigned int>(mPackets.back()->size);
         }
         mPacketCond.notify_one();
         return true;
@@ -315,8 +367,8 @@ struct AudioState {
     /* Time of the next sample to be buffered */
     nanoseconds mCurrentPts{0};
 
-    /* Device clock time that the stream started at. */
-    nanoseconds mDeviceStartTime{nanoseconds::min()};
+    /* The PTS of the start of the source playback. */
+    nanoseconds mStartPts{nanoseconds::min()};
 
     /* Decompressed sample frame, and swresample context for conversion */
     AVFramePtr    mDecodedFrame;
@@ -328,7 +380,7 @@ struct AudioState {
 
     /* Storage of converted samples */
     std::array<uint8_t*,1> mSamples{};
-    al::span<uint8_t> mSamplesSpan;
+    std::span<uint8_t> mSamplesSpan;
     int mSamplesLen{0}; /* In samples */
     int mSamplesPos{0};
     int mSamplesMax{0};
@@ -343,7 +395,7 @@ struct AudioState {
 
     std::mutex mSrcMutex;
     std::condition_variable mSrcCond;
-    std::atomic_flag mConnected{};
+    std::atomic_flag mConnected;
     ALuint mSource{0};
     std::array<ALuint,AudioBufferCount> mBuffers{};
     ALuint mBufferIdx{0};
@@ -381,7 +433,7 @@ struct AudioState {
 
     int getSync();
     int decodeFrame();
-    bool readAudio(al::span<uint8_t> samples, unsigned int length, int &sample_skip);
+    bool readAudio(std::span<uint8_t> samples, unsigned int length, int &sample_skip);
     bool readAudio(int sample_skip);
 
     int handler();
@@ -409,13 +461,15 @@ struct VideoState {
         AVFramePtr mFrame;
         nanoseconds mPts{nanoseconds::min()};
     };
-    std::array<Picture,VIDEO_PICTURE_QUEUE_SIZE> mPictQ;
+    std::array<Picture,VideoPictureQueueSize> mPictQ;
     std::atomic<size_t> mPictQRead{0u}, mPictQWrite{1u};
     std::mutex mPictQMutex;
     std::condition_variable mPictQCond;
 
     SDL_Texture *mImage{nullptr};
     int mWidth{0}, mHeight{0}; /* Full texture size */
+    unsigned int mSDLFormat{SDL_PIXELFORMAT_UNKNOWN};
+    int mAVFormat{AV_PIX_FMT_NONE};
     bool mFirstUpdate{true};
 
     std::atomic<bool> mEOS{false};
@@ -449,9 +503,7 @@ struct MovieState {
     AudioState mAudio;
     VideoState mVideo;
 
-    std::mutex mStartupMutex;
-    std::condition_variable mStartupCond;
-    bool mStartupDone{false};
+    std::atomic<bool> mStartupDone{false};
 
     std::thread mParseThread;
     std::thread mAudioThread;
@@ -484,65 +536,49 @@ struct MovieState {
 
 nanoseconds AudioState::getClockNoLock()
 {
-    // The audio clock is the timestamp of the sample currently being heard.
-    if(alcGetInteger64vSOFT)
-    {
-        // If device start time = min, we aren't playing yet.
-        if(mDeviceStartTime == nanoseconds::min())
-            return nanoseconds::zero();
-
-        // Get the current device clock time and latency.
-        auto device = alcGetContextsDevice(alcGetCurrentContext());
-        std::array<ALCint64SOFT,2> devtimes{};
-        alcGetInteger64vSOFT(device, ALC_DEVICE_CLOCK_LATENCY_SOFT, 2, devtimes.data());
-        auto latency = nanoseconds{devtimes[1]};
-        auto device_time = nanoseconds{devtimes[0]};
-
-        // The clock is simply the current device time relative to the recorded
-        // start time. We can also subtract the latency to get more a accurate
-        // position of where the audio device actually is in the output stream.
-        return device_time - mDeviceStartTime - latency;
-    }
-
+    /* The audio clock is the timestamp of the sample currently being heard. */
     if(!mBufferData.empty())
     {
-        if(mDeviceStartTime == nanoseconds::min())
+        if(mStartPts == nanoseconds::min())
             return nanoseconds::zero();
 
-        /* With a callback buffer and no device clock, mDeviceStartTime is
-         * actually the timestamp of the first sample frame played. The audio
-         * clock, then, is that plus the current source offset.
+        /* With a callback buffer, mStartPts is the timestamp of the first
+         * sample frame played. The audio clock, then, is that plus the current
+         * source offset.
          */
-        std::array<ALint64SOFT,2> offset{};
+        auto offset = std::array<ALint64SOFT,2>{};
         if(alGetSourcei64vSOFT)
             alGetSourcei64vSOFT(mSource, AL_SAMPLE_OFFSET_LATENCY_SOFT, offset.data());
         else
         {
-            ALint ioffset;
+            auto ioffset = ALint{};
             alGetSourcei(mSource, AL_SAMPLE_OFFSET, &ioffset);
             offset[0] = ALint64SOFT{ioffset} << 32;
         }
+
         /* NOTE: The source state must be checked last, in case an underrun
          * occurs and the source stops between getting the state and retrieving
          * the offset+latency.
          */
-        ALint status;
+        auto status = ALint{};
         alGetSourcei(mSource, AL_SOURCE_STATE, &status);
 
-        nanoseconds pts{};
+        auto pts = nanoseconds{};
         if(status == AL_PLAYING || status == AL_PAUSED)
-            pts = mDeviceStartTime - nanoseconds{offset[1]} +
-                duration_cast<nanoseconds>(fixed32{offset[0] / mCodecCtx->sample_rate});
+        {
+            const auto sec_fixed32 = fixed32{offset[0] / mCodecCtx->sample_rate};
+            pts = mStartPts + duration_cast<nanoseconds>(sec_fixed32) - nanoseconds{offset[1]};
+        }
         else
         {
             /* If the source is stopped, the pts of the next sample to be heard
              * is the pts of the next sample to be buffered, minus the amount
              * already in the buffer ready to play.
              */
-            const size_t woffset{mWritePos.load(std::memory_order_acquire)};
-            const size_t roffset{mReadPos.load(std::memory_order_relaxed)};
-            const size_t readable{((woffset>=roffset) ? woffset : (mBufferData.size()+woffset)) -
-                roffset};
+            const auto woffset = mWritePos.load(std::memory_order_acquire);
+            const auto roffset = mReadPos.load(std::memory_order_relaxed);
+            /* Account for the write offset wrapping behind the read offset. */
+            const auto readable = (woffset < roffset)*mBufferData.size() + woffset - roffset;
 
             pts = mCurrentPts - nanoseconds{seconds{readable/mFrameSize}}/mCodecCtx->sample_rate;
         }
@@ -601,56 +637,30 @@ nanoseconds AudioState::getClockNoLock()
 
 bool AudioState::startPlayback()
 {
-    const size_t woffset{mWritePos.load(std::memory_order_acquire)};
-    const size_t roffset{mReadPos.load(std::memory_order_relaxed)};
-    const size_t readable{((woffset >= roffset) ? woffset : (mBufferData.size()+woffset)) -
-        roffset};
-
     if(!mBufferData.empty())
     {
-        if(readable == 0)
-            return false;
-        if(!alcGetInteger64vSOFT)
-            mDeviceStartTime = mCurrentPts -
-                nanoseconds{seconds{readable/mFrameSize}}/mCodecCtx->sample_rate;
+        const auto woffset = mWritePos.load(std::memory_order_acquire);
+        const auto roffset = mReadPos.load(std::memory_order_relaxed);
+        /* Account for the write offset wrapping behind the read offset. */
+        const auto readable = (woffset < roffset)*mBufferData.size() + woffset - roffset;
+        if(readable == 0) return false;
+
+        const auto nanosamples = nanoseconds{seconds{readable / mFrameSize}};
+        mStartPts = mCurrentPts - nanosamples/mCodecCtx->sample_rate;
     }
     else
     {
-        ALint queued{};
+        auto queued = ALint{};
         alGetSourcei(mSource, AL_BUFFERS_QUEUED, &queued);
         if(queued == 0) return false;
-    }
 
-    alSourcePlay(mSource);
-    if(alcGetInteger64vSOFT)
-    {
         /* Subtract the total buffer queue time from the current pts to get the
          * pts of the start of the queue.
          */
-        std::array<int64_t,2> srctimes{};
-        alGetSourcei64vSOFT(mSource, AL_SAMPLE_OFFSET_CLOCK_SOFT, srctimes.data());
-        auto device_time = nanoseconds{srctimes[1]};
-        auto src_offset = duration_cast<nanoseconds>(fixed32{srctimes[0]}) /
-            mCodecCtx->sample_rate;
-
-        /* The mixer may have ticked and incremented the device time and sample
-         * offset, so subtract the source offset from the device time to get
-         * the device time the source started at. Also subtract startpts to get
-         * the device time the stream would have started at to reach where it
-         * is now.
-         */
-        if(!mBufferData.empty())
-        {
-            nanoseconds startpts{mCurrentPts -
-                nanoseconds{seconds{readable/mFrameSize}}/mCodecCtx->sample_rate};
-            mDeviceStartTime = device_time - src_offset - startpts;
-        }
-        else
-        {
-            nanoseconds startpts{mCurrentPts - AudioBufferTotalTime};
-            mDeviceStartTime = device_time - src_offset - startpts;
-        }
+        mStartPts = mCurrentPts - AudioBufferTime*queued;
     }
+
+    alSourcePlay(mSource);
     return true;
 }
 
@@ -715,23 +725,26 @@ int AudioState::decodeFrame()
  * multiple of the template type size.
  */
 template<typename T>
-void sample_dup(al::span<uint8_t> out, al::span<const uint8_t> in, size_t count, size_t frame_size)
+void sample_dup(std::span<uint8_t> out, std::span<const uint8_t> in, size_t count,
+    size_t frame_size)
 {
-    auto sample = al::span{reinterpret_cast<const T*>(in.data()), in.size()/sizeof(T)};
-    auto dst = al::span{reinterpret_cast<T*>(out.data()), out.size()/sizeof(T)};
-
     /* NOTE: frame_size is a multiple of sizeof(T). */
-    const size_t type_mult{frame_size / sizeof(T)};
-    if(type_mult == 1)
+    const auto sample = std::span{reinterpret_cast<const T*>(in.data()), in.size()/sizeof(T)}
+        .first(frame_size / sizeof(T));
+    const auto dst = std::span{reinterpret_cast<T*>(out.data()), out.size()/sizeof(T)};
+
+    if(sample.size() == 1)
         std::fill_n(dst.begin(), count, sample.front());
-    else for(size_t i{0};i < count;++i)
+    else
     {
-        for(size_t j{0};j < type_mult;++j)
-            dst[i*type_mult + j] = sample[j];
+        auto dstiter = dst.begin();
+        for(size_t i{0};i < count;++i)
+            dstiter = std::copy(sample.begin(), sample.end(), dstiter);
     }
 }
 
-void sample_dup(al::span<uint8_t> out, al::span<const uint8_t> in, size_t count, size_t frame_size)
+void sample_dup(std::span<uint8_t> out, std::span<const uint8_t> in, size_t count,
+    size_t frame_size)
 {
     if((frame_size&7) == 0)
         sample_dup<uint64_t>(out, in, count, frame_size);
@@ -743,7 +756,7 @@ void sample_dup(al::span<uint8_t> out, al::span<const uint8_t> in, size_t count,
         sample_dup<uint8_t>(out, in, count, frame_size);
 }
 
-bool AudioState::readAudio(al::span<uint8_t> samples, unsigned int length, int &sample_skip)
+bool AudioState::readAudio(std::span<uint8_t> samples, unsigned int length, int &sample_skip)
 {
     unsigned int audio_size{0};
 
@@ -756,8 +769,9 @@ bool AudioState::readAudio(al::span<uint8_t> samples, unsigned int length, int &
         if(mSamplesPos >= 0)
         {
             rem = std::min(rem, static_cast<unsigned int>(mSamplesLen - mSamplesPos));
-            const size_t boffset{static_cast<ALuint>(mSamplesPos) * size_t{mFrameSize}};
-            std::copy_n(mSamplesSpan.cbegin()+ptrdiff_t(boffset), rem*size_t{mFrameSize},
+
+            const auto boffset = static_cast<ALuint>(mSamplesPos) * size_t{mFrameSize};
+            std::copy_n(mSamplesSpan.begin()+ptrdiff_t(boffset), rem*size_t{mFrameSize},
                 samples.begin());
         }
         else
@@ -781,11 +795,12 @@ bool AudioState::readAudio(al::span<uint8_t> samples, unsigned int length, int &
 
             sample_skip -= mSamplesPos;
 
-            // Adjust the device start time and current pts by the amount we're
-            // skipping/duplicating, so that the clock remains correct for the
-            // current stream position.
+            /* Adjust the start time and current pts by the amount we're
+             * skipping/duplicating, so that the clock remains correct for the
+             * current stream position.
+             */
             auto skip = nanoseconds{seconds{mSamplesPos}} / mCodecCtx->sample_rate;
-            mDeviceStartTime -= skip;
+            mStartPts -= skip;
             mCurrentPts += skip;
         }
     }
@@ -815,9 +830,9 @@ bool AudioState::readAudio(int sample_skip)
 
         if(mSamplesPos < 0)
         {
-            const size_t rem{std::min<size_t>(nsamples, static_cast<ALuint>(-mSamplesPos))};
+            const auto rem = std::min<size_t>(nsamples, static_cast<ALuint>(-mSamplesPos));
 
-            sample_dup(al::span{mBufferData}.subspan(woffset), mSamplesSpan, rem, mFrameSize);
+            sample_dup(std::span{mBufferData}.subspan(woffset), mSamplesSpan, rem, mFrameSize);
             woffset += rem * mFrameSize;
             if(woffset == mBufferData.size()) woffset = 0;
             mWritePos.store(woffset, std::memory_order_release);
@@ -831,7 +846,7 @@ bool AudioState::readAudio(int sample_skip)
         const size_t boffset{static_cast<ALuint>(mSamplesPos) * size_t{mFrameSize}};
         const size_t nbytes{rem * mFrameSize};
 
-        std::copy_n(mSamplesSpan.cbegin()+ptrdiff_t(boffset), nbytes,
+        std::copy_n(mSamplesSpan.begin()+ptrdiff_t(boffset), nbytes,
             mBufferData.begin()+ptrdiff_t(woffset));
         woffset += nbytes;
         if(woffset == mBufferData.size()) woffset = 0;
@@ -849,7 +864,7 @@ bool AudioState::readAudio(int sample_skip)
             sample_skip -= mSamplesPos;
 
             auto skip = nanoseconds{seconds{mSamplesPos}} / mCodecCtx->sample_rate;
-            mDeviceStartTime -= skip;
+            mStartPts -= skip;
             mCurrentPts += skip;
         }
     }
@@ -897,7 +912,7 @@ void AL_APIENTRY AudioState::eventCallback(ALenum eventType, ALuint object, ALui
 
 ALsizei AudioState::bufferCallback(void *data, ALsizei size) noexcept
 {
-    auto dst = al::span{static_cast<ALbyte*>(data), static_cast<ALuint>(size)};
+    auto dst = std::span{static_cast<ALbyte*>(data), static_cast<ALuint>(size)};
     ALsizei got{0};
 
     size_t roffset{mReadPos.load(std::memory_order_acquire)};
@@ -965,8 +980,10 @@ int AudioState::handler()
     const auto has_bfmt_ex = bool{alIsExtensionPresent("AL_SOFT_bformat_ex") != AL_FALSE};
     const auto has_bfmt_hoa = bool{has_bfmt_ex
         && alIsExtensionPresent("AL_SOFT_bformat_hoa") != AL_FALSE};
-    /* AL_SOFT_bformat_hoa supports up to 14th order (225 channels). */
-    static constexpr auto max_ambi_order = 14;
+    /* AL_SOFT_bformat_hoa supports up to 14th order (225 channels), otherwise
+     * only 1st order is supported with AL_EXT_BFORMAT.
+     */
+    const auto max_ambi_order = has_bfmt_hoa ? 14 : 1;
     auto ambi_order = 0;
 
     /* Find a suitable format for OpenAL. */
@@ -1027,11 +1044,7 @@ int AudioState::handler()
             if(channels == ALuint(mCodecCtx->ch_layout.nb_channels)
                 || channels+2 == ALuint(mCodecCtx->ch_layout.nb_channels))
             {
-                /* OpenAL only supports first-order with AL_EXT_BFORMAT, which
-                 * is 4 channels for 3D buffers, unless AL_SOFT_bformat_hoa is
-                 * also supported.
-                 */
-                ambi_order = has_bfmt_hoa ? std::min(order, max_ambi_order) : 1;
+                ambi_order = std::min(order, max_ambi_order);
                 mFrameSize *= ALuint(ambi_order+1) * ALuint(ambi_order+1);
                 mFormat = alGetEnumValue("AL_FORMAT_BFORMAT3D_FLOAT32");
             }
@@ -1085,7 +1098,7 @@ int AudioState::handler()
             if(channels == mCodecCtx->ch_layout.nb_channels
                 || channels+2 == mCodecCtx->ch_layout.nb_channels)
             {
-                ambi_order = has_bfmt_hoa ? std::min(order, max_ambi_order) : 1;
+                ambi_order = std::min(order, max_ambi_order);
                 mFrameSize *= ALuint(ambi_order+1) * ALuint(ambi_order+1);
                 mFormat = alGetEnumValue("AL_FORMAT_BFORMAT3D_8");
             }
@@ -1139,7 +1152,7 @@ int AudioState::handler()
             if(channels == mCodecCtx->ch_layout.nb_channels
                 || channels+2 == mCodecCtx->ch_layout.nb_channels)
             {
-                ambi_order = has_bfmt_hoa ? std::min(order, max_ambi_order) : 1;
+                ambi_order = std::min(order, max_ambi_order);
                 mFrameSize *= ALuint(ambi_order+1) * ALuint(ambi_order+1);
                 mFormat = alGetEnumValue("AL_FORMAT_BFORMAT3D_16");
             }
@@ -1231,8 +1244,8 @@ int AudioState::handler()
         alSourcei(mSource, AL_DIRECT_CHANNELS_SOFT, DirectOutMode);
     if(EnableWideStereo)
     {
-        static constexpr std::array angles{static_cast<float>(al::numbers::pi / 3.0),
-            static_cast<float>(-al::numbers::pi / 3.0)};
+        static constexpr std::array angles{static_cast<float>(std::numbers::pi / 3.0),
+            static_cast<float>(-std::numbers::pi / 3.0)};
         alSourcefv(mSource, AL_STEREO_ANGLES, angles.data());
     }
     if(has_bfmt_ex)
@@ -1299,21 +1312,13 @@ int AudioState::handler()
     auto sender [[maybe_unused]] = std::async(std::launch::async, packet_sender);
 
     srclock.lock();
-    if(alcGetInteger64vSOFT)
-    {
-        int64_t devtime{};
-        alcGetInteger64vSOFT(alcGetContextsDevice(alcGetCurrentContext()), ALC_DEVICE_CLOCK_SOFT,
-            1, &devtime);
-        mDeviceStartTime = nanoseconds{devtime} - mCurrentPts;
-    }
-
     mSamplesLen = decodeFrame();
     if(mSamplesLen > 0)
     {
         mSamplesPos = std::min(mSamplesLen, getSync());
 
         auto skip = nanoseconds{seconds{mSamplesPos}} / mCodecCtx->sample_rate;
-        mDeviceStartTime -= skip;
+        mStartPts -= skip;
         mCurrentPts += skip;
     }
 
@@ -1384,16 +1389,6 @@ int AudioState::handler()
                  */
                 alSourceRewind(mSource);
                 alSourcei(mSource, AL_BUFFER, 0);
-                if(alcGetInteger64vSOFT)
-                {
-                    /* Also update the device start time with the current
-                     * device clock, so the decoder knows we're running behind.
-                     */
-                    int64_t devtime{};
-                    alcGetInteger64vSOFT(alcGetContextsDevice(alcGetCurrentContext()),
-                        ALC_DEVICE_CLOCK_SOFT, 1, &devtime);
-                    mDeviceStartTime = nanoseconds{devtime} - mCurrentPts;
-                }
                 continue;
             }
         }
@@ -1491,18 +1486,174 @@ void VideoState::updateVideo(SDL_Window *screen, SDL_Renderer *renderer, bool re
         mPictQCond.notify_one();
 
         /* allocate or resize the buffer! */
-        bool fmt_updated{false};
-        if(!mImage || mWidth != frame->width || mHeight != frame->height)
+        if(!mImage || mWidth != frame->width || mHeight != frame->height
+            || frame->format != mAVFormat)
         {
-            fmt_updated = true;
             if(mImage)
                 SDL_DestroyTexture(mImage);
-            mImage = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_IYUV, SDL_TEXTUREACCESS_STREAMING,
-                frame->width, frame->height);
-            if(!mImage)
-                fmt::println(stderr, "Failed to create YV12 texture!");
-            mWidth = frame->width;
-            mHeight = frame->height;
+            mImage = nullptr;
+            mSwscaleCtx = nullptr;
+
+            auto fmtiter = std::find_if(TextureFormatMap.begin(), TextureFormatMap.end(),
+                [frame](const TextureFormatEntry &entry) noexcept
+                { return frame->format == entry.avformat; });
+            if(fmtiter != TextureFormatMap.end())
+            {
+                auto props = SDLProps{};
+                props.setInt(SDL_PROP_TEXTURE_CREATE_FORMAT_NUMBER, fmtiter->sdlformat);
+                props.setInt(SDL_PROP_TEXTURE_CREATE_ACCESS_NUMBER, SDL_TEXTUREACCESS_STREAMING);
+                props.setInt(SDL_PROP_TEXTURE_CREATE_WIDTH_NUMBER, frame->width);
+                props.setInt(SDL_PROP_TEXTURE_CREATE_HEIGHT_NUMBER, frame->height);
+
+                /* Should be a better way to check YCbCr vs RGB. */
+                const auto ctype = (frame->format == AV_PIX_FMT_YUV420P
+                    || frame->format == AV_PIX_FMT_YUYV422
+                    || frame->format == AV_PIX_FMT_UYVY422 || frame->format == AV_PIX_FMT_NV12
+                    || frame->format == AV_PIX_FMT_NV21) ? SDL_COLOR_TYPE_YCBCR
+                    : SDL_COLOR_TYPE_RGB;
+                const auto crange = std::invoke([frame]
+                {
+                    switch(frame->color_range)
+                    {
+                    case AVCOL_RANGE_UNSPECIFIED: return SDL_COLOR_RANGE_UNKNOWN;
+                    case AVCOL_RANGE_MPEG: return SDL_COLOR_RANGE_LIMITED;
+                    case AVCOL_RANGE_JPEG: return SDL_COLOR_RANGE_FULL;
+                    case AVCOL_RANGE_NB: break;
+                    }
+                    return SDL_COLOR_RANGE_UNKNOWN;
+                });
+                const auto cprims = std::invoke([frame]
+                {
+                    switch(frame->color_primaries)
+                    {
+                    case AVCOL_PRI_RESERVED0: break;
+                    case AVCOL_PRI_BT709: return SDL_COLOR_PRIMARIES_BT709;
+                    case AVCOL_PRI_UNSPECIFIED: return SDL_COLOR_PRIMARIES_UNSPECIFIED;
+                    case AVCOL_PRI_RESERVED: break;
+                    case AVCOL_PRI_BT470M: return SDL_COLOR_PRIMARIES_BT470M;
+                    case AVCOL_PRI_BT470BG: return SDL_COLOR_PRIMARIES_BT470BG;
+                    case AVCOL_PRI_SMPTE170M: return SDL_COLOR_PRIMARIES_BT601;
+                    case AVCOL_PRI_SMPTE240M: return SDL_COLOR_PRIMARIES_SMPTE240;
+                    case AVCOL_PRI_FILM: return SDL_COLOR_PRIMARIES_GENERIC_FILM;
+                    case AVCOL_PRI_BT2020: return SDL_COLOR_PRIMARIES_BT2020;
+                    case AVCOL_PRI_SMPTE428: return SDL_COLOR_PRIMARIES_XYZ;
+                    case AVCOL_PRI_SMPTE431: return SDL_COLOR_PRIMARIES_SMPTE431;
+                    case AVCOL_PRI_SMPTE432: return SDL_COLOR_PRIMARIES_SMPTE432;
+                    case AVCOL_PRI_EBU3213: return SDL_COLOR_PRIMARIES_EBU3213;
+                    case AVCOL_PRI_NB: break;
+                    }
+                    return SDL_COLOR_PRIMARIES_UNKNOWN;
+                });
+                const auto ctransfer = std::invoke([frame]
+                {
+                    switch(frame->color_trc)
+                    {
+                    case AVCOL_TRC_RESERVED0: break;
+                    case AVCOL_TRC_BT709: return SDL_TRANSFER_CHARACTERISTICS_BT709;
+                    case AVCOL_TRC_UNSPECIFIED: return SDL_TRANSFER_CHARACTERISTICS_UNSPECIFIED;
+                    case AVCOL_TRC_RESERVED: break;
+                    case AVCOL_TRC_GAMMA22: return SDL_TRANSFER_CHARACTERISTICS_GAMMA22;
+                    case AVCOL_TRC_GAMMA28: return SDL_TRANSFER_CHARACTERISTICS_GAMMA28;
+                    case AVCOL_TRC_SMPTE170M: return SDL_TRANSFER_CHARACTERISTICS_BT601;
+                    case AVCOL_TRC_SMPTE240M: return SDL_TRANSFER_CHARACTERISTICS_SMPTE240;
+                    case AVCOL_TRC_LINEAR: return SDL_TRANSFER_CHARACTERISTICS_LINEAR;
+                    case AVCOL_TRC_LOG: return SDL_TRANSFER_CHARACTERISTICS_LOG100;
+                    case AVCOL_TRC_LOG_SQRT: return SDL_TRANSFER_CHARACTERISTICS_LOG100_SQRT10;
+                    case AVCOL_TRC_IEC61966_2_4: return SDL_TRANSFER_CHARACTERISTICS_IEC61966;
+                    case AVCOL_TRC_BT1361_ECG: return SDL_TRANSFER_CHARACTERISTICS_BT1361;
+                    case AVCOL_TRC_IEC61966_2_1: return SDL_TRANSFER_CHARACTERISTICS_SRGB;
+                    case AVCOL_TRC_BT2020_10: return SDL_TRANSFER_CHARACTERISTICS_BT2020_10BIT;
+                    case AVCOL_TRC_BT2020_12: return SDL_TRANSFER_CHARACTERISTICS_BT2020_12BIT;
+                    case AVCOL_TRC_SMPTE2084: return SDL_TRANSFER_CHARACTERISTICS_PQ;
+                    case AVCOL_TRC_SMPTE428: return SDL_TRANSFER_CHARACTERISTICS_SMPTE428;
+                    case AVCOL_TRC_ARIB_STD_B67: return SDL_TRANSFER_CHARACTERISTICS_HLG;
+                    case AVCOL_TRC_NB: break;
+                    }
+                    return SDL_TRANSFER_CHARACTERISTICS_UNKNOWN;
+                });
+                const auto cmatrix = std::invoke([frame]
+                {
+                    switch(frame->colorspace)
+                    {
+                    case AVCOL_SPC_RGB: return SDL_MATRIX_COEFFICIENTS_IDENTITY;
+                    case AVCOL_SPC_BT709: return SDL_MATRIX_COEFFICIENTS_BT709;
+                    case AVCOL_SPC_UNSPECIFIED: return SDL_MATRIX_COEFFICIENTS_UNSPECIFIED;
+                    case AVCOL_SPC_RESERVED: break;
+                    case AVCOL_SPC_FCC: return SDL_MATRIX_COEFFICIENTS_FCC;
+                    case AVCOL_SPC_BT470BG: return SDL_MATRIX_COEFFICIENTS_BT470BG;
+                    case AVCOL_SPC_SMPTE170M: return SDL_MATRIX_COEFFICIENTS_BT601;
+                    case AVCOL_SPC_SMPTE240M: return SDL_MATRIX_COEFFICIENTS_SMPTE240;
+                    case AVCOL_SPC_YCGCO: return SDL_MATRIX_COEFFICIENTS_YCGCO;
+                    case AVCOL_SPC_BT2020_NCL: return SDL_MATRIX_COEFFICIENTS_BT2020_NCL;
+                    case AVCOL_SPC_BT2020_CL: return SDL_MATRIX_COEFFICIENTS_BT2020_CL;
+                    case AVCOL_SPC_SMPTE2085: return SDL_MATRIX_COEFFICIENTS_SMPTE2085;
+                    case AVCOL_SPC_CHROMA_DERIVED_NCL: return SDL_MATRIX_COEFFICIENTS_CHROMA_DERIVED_NCL;
+                    case AVCOL_SPC_CHROMA_DERIVED_CL: return SDL_MATRIX_COEFFICIENTS_CHROMA_DERIVED_CL;
+                    case AVCOL_SPC_ICTCP: return SDL_MATRIX_COEFFICIENTS_ICTCP;
+                    case AVCOL_SPC_IPT_C2: break; // ???
+                    case AVCOL_SPC_YCGCO_RE: return SDL_MATRIX_COEFFICIENTS_YCGCO; // ???
+                    case AVCOL_SPC_YCGCO_RO: return SDL_MATRIX_COEFFICIENTS_YCGCO; // ???
+                    case AVCOL_SPC_NB: break;
+                    }
+                    return SDL_MATRIX_COEFFICIENTS_UNSPECIFIED;
+                });
+                const auto cchromaloc = std::invoke([frame]
+                {
+                    switch(frame->chroma_location)
+                    {
+                    case AVCHROMA_LOC_UNSPECIFIED: return SDL_CHROMA_LOCATION_NONE;
+                    case AVCHROMA_LOC_LEFT: return SDL_CHROMA_LOCATION_LEFT;
+                    case AVCHROMA_LOC_CENTER: return SDL_CHROMA_LOCATION_CENTER;
+                    case AVCHROMA_LOC_TOPLEFT: return SDL_CHROMA_LOCATION_TOPLEFT;
+                    case AVCHROMA_LOC_TOP: return SDL_CHROMA_LOCATION_TOPLEFT; // ???
+                    case AVCHROMA_LOC_BOTTOMLEFT: return SDL_CHROMA_LOCATION_LEFT; // ???
+                    case AVCHROMA_LOC_BOTTOM: return SDL_CHROMA_LOCATION_CENTER; // ???
+                    case AVCHROMA_LOC_NB: break;
+                    }
+                    return SDL_CHROMA_LOCATION_NONE;
+                });
+
+                const auto colorspace = DefineSDLColorspace(ctype, crange, cprims, ctransfer,
+                    cmatrix, cchromaloc);
+                props.setInt(SDL_PROP_TEXTURE_CREATE_COLORSPACE_NUMBER, colorspace);
+
+                mImage = SDL_CreateTextureWithProperties(renderer, props.getid());
+                if(!mImage)
+                    fmt::println(stderr, "Failed to create texture!");
+                mWidth = frame->width;
+                mHeight = frame->height;
+                mSDLFormat = fmtiter->sdlformat;
+                mAVFormat = fmtiter->avformat;
+            }
+            else
+            {
+                /* If there's no matching format, convert to RGB24. */
+                fmt::println(stderr, "Could not find SDL texture format for pix_fmt {0:#x} ({0})",
+                    as_unsigned(frame->format));
+
+                auto props = SDLProps{};
+                props.setInt(SDL_PROP_TEXTURE_CREATE_FORMAT_NUMBER, SDL_PIXELFORMAT_RGB24);
+                props.setInt(SDL_PROP_TEXTURE_CREATE_ACCESS_NUMBER, SDL_TEXTUREACCESS_STREAMING);
+                props.setInt(SDL_PROP_TEXTURE_CREATE_WIDTH_NUMBER, frame->width);
+                props.setInt(SDL_PROP_TEXTURE_CREATE_HEIGHT_NUMBER, frame->height);
+
+                mImage = SDL_CreateTextureWithProperties(renderer, props.getid());
+                if(!mImage)
+                    fmt::println(stderr, "Failed to create texture!");
+                mWidth = frame->width;
+                mHeight = frame->height;
+                mSDLFormat = SDL_PIXELFORMAT_RGB24;
+                mAVFormat = frame->format;
+
+                mSwscaleCtx = SwsContextPtr{sws_getContext(
+                    frame->width, frame->height, static_cast<AVPixelFormat>(frame->format),
+                    frame->width, frame->height, AV_PIX_FMT_RGB24, 0,
+                    nullptr, nullptr, nullptr)};
+
+                sws_setColorspaceDetails(mSwscaleCtx.get(), sws_getCoefficients(frame->colorspace),
+                    (frame->color_range==AVCOL_RANGE_JPEG), sws_getCoefficients(SWS_CS_DEFAULT), 1,
+                    0<<16, 1<<16, 1<<16);
+            }
         }
 
         int frame_width{frame->width - static_cast<int>(frame->crop_left + frame->crop_right)};
@@ -1528,45 +1679,37 @@ void VideoState::updateVideo(SDL_Window *screen, SDL_Renderer *renderer, bool re
 
         if(mImage)
         {
-            void *pixels{nullptr};
-            int pitch{0};
-
-            if(mCodecCtx->pix_fmt == AV_PIX_FMT_YUV420P)
+            if(mSDLFormat == SDL_PIXELFORMAT_IYUV || mSDLFormat == SDL_PIXELFORMAT_YV12)
                 SDL_UpdateYUVTexture(mImage, nullptr,
                     frame->data[0], frame->linesize[0],
                     frame->data[1], frame->linesize[1],
-                    frame->data[2], frame->linesize[2]
-                );
-            else if(!SDL_LockTexture(mImage, nullptr, &pixels, &pitch))
-                fmt::println(stderr, "Failed to lock texture: {}", SDL_GetError());
-            else
+                    frame->data[2], frame->linesize[2]);
+            else if(mSDLFormat == SDL_PIXELFORMAT_NV12 || mSDLFormat == SDL_PIXELFORMAT_NV21)
+                SDL_UpdateNVTexture(mImage, nullptr,
+                    frame->data[0], frame->linesize[0],
+                    frame->data[1], frame->linesize[1]);
+            else if(mSwscaleCtx)
             {
-                // Convert the image into YUV format that SDL uses
-                int w{frame->width};
-                int h{frame->height};
-                if(!mSwscaleCtx || fmt_updated)
+                auto pixels = voidp{};
+                auto pitch = int{};
+                if(!SDL_LockTexture(mImage, nullptr, &pixels, &pitch))
+                    fmt::println(stderr, "Failed to lock texture: {}", SDL_GetError());
+                else
                 {
-                    mSwscaleCtx.reset(sws_getContext(
-                        w, h, mCodecCtx->pix_fmt,
-                        w, h, AV_PIX_FMT_YUV420P, 0,
-                        nullptr, nullptr, nullptr
-                    ));
+                    /* Formats passing through mSwscaleCtx are converted to
+                     * 24-bit RGB, which is interleaved/non-planar.
+                     */
+                    const auto pict_data = std::array{static_cast<uint8_t*>(pixels)};
+                    const auto pict_linesize = std::array{pitch};
+
+                    sws_scale(mSwscaleCtx.get(), std::data(frame->data),
+                        std::data(frame->linesize), 0, frame->height, pict_data.data(),
+                        pict_linesize.data());
+                    SDL_UnlockTexture(mImage);
                 }
-
-                /* point pict at the queue */
-                const auto framesize = static_cast<size_t>(w)*static_cast<size_t>(h);
-                const auto pixelspan = al::span{static_cast<uint8_t*>(pixels), framesize*3/2};
-                const std::array pict_data{
-                    al::to_address(pixelspan.begin()),
-                    al::to_address(pixelspan.begin() + ptrdiff_t{w}*h),
-                    al::to_address(pixelspan.begin() + ptrdiff_t{w}*h + ptrdiff_t{w}*h/4)
-                };
-                const std::array pict_linesize{pitch, pitch/2, pitch/2};
-
-                sws_scale(mSwscaleCtx.get(), std::data(frame->data), std::data(frame->linesize),
-                    0, h, pict_data.data(), pict_linesize.data());
-                SDL_UnlockTexture(mImage);
             }
+            else
+                SDL_UpdateTexture(mImage, nullptr, frame->data[0], frame->linesize[0]);
 
             redraw = true;
         }
@@ -1659,7 +1802,9 @@ int VideoState::handler()
             /* Wait until we have space for a new pic */
             auto lock = std::unique_lock{mPictQMutex};
             mPictQCond.wait(lock, [write_idx,this]() noexcept
-                { return write_idx != mPictQRead.load(std::memory_order_acquire); });
+            {
+                return write_idx != mPictQRead.load(std::memory_order_acquire);
+            });
         }
     }
 
@@ -1679,27 +1824,24 @@ int MovieState::decode_interrupt_cb(void *ctx)
 
 bool MovieState::prepare()
 {
-    AVIOContext *avioctx{nullptr};
-    AVIOInterruptCB intcb{decode_interrupt_cb, this};
-    if(avio_open2(&avioctx, mFilename.c_str(), AVIO_FLAG_READ, &intcb, nullptr))
+    auto intcb = AVIOInterruptCB{decode_interrupt_cb, this};
+    if(avio_open2(al::out_ptr(mIOContext), mFilename.c_str(), AVIO_FLAG_READ, &intcb, nullptr) < 0)
     {
         fmt::println(stderr, "Failed to open {}", mFilename);
         return false;
     }
-    mIOContext.reset(avioctx);
 
     /* Open movie file. If avformat_open_input fails it will automatically free
-     * this context, so don't set it onto a smart pointer yet.
+     * this context.
      */
-    AVFormatContext *fmtctx{avformat_alloc_context()};
-    fmtctx->pb = mIOContext.get();
-    fmtctx->interrupt_callback = intcb;
-    if(avformat_open_input(&fmtctx, mFilename.c_str(), nullptr, nullptr) != 0)
+    mFormatCtx.reset(avformat_alloc_context());
+    mFormatCtx->pb = mIOContext.get();
+    mFormatCtx->interrupt_callback = intcb;
+    if(avformat_open_input(al::inout_ptr(mFormatCtx), mFilename.c_str(), nullptr, nullptr) < 0)
     {
         fmt::println(stderr, "Failed to open {}", mFilename);
         return false;
     }
-    mFormatCtx.reset(fmtctx);
 
     /* Retrieve stream information */
     if(avformat_find_stream_info(mFormatCtx.get(), nullptr) < 0)
@@ -1713,8 +1855,7 @@ bool MovieState::prepare()
 
     mParseThread = std::thread{&MovieState::parse_handler, this};
 
-    std::unique_lock<std::mutex> slock{mStartupMutex};
-    while(!mStartupDone) mStartupCond.wait(slock);
+    mStartupDone.wait(false, std::memory_order_acquire);
     return true;
 }
 
@@ -1795,7 +1936,7 @@ int MovieState::parse_handler()
     int audio_index{-1};
 
     /* Find the first video and audio streams */
-    const auto ctxstreams = al::span{mFormatCtx->streams, mFormatCtx->nb_streams};
+    const auto ctxstreams = std::span{mFormatCtx->streams, mFormatCtx->nb_streams};
     for(size_t i{0};i < ctxstreams.size();++i)
     {
         auto codecpar = ctxstreams[i]->codecpar;
@@ -1807,11 +1948,8 @@ int MovieState::parse_handler()
             audio_index = static_cast<int>(i);
     }
 
-    {
-        std::unique_lock<std::mutex> slock{mStartupMutex};
-        mStartupDone = true;
-    }
-    mStartupCond.notify_all();
+    mStartupDone.store(true, std::memory_order_release);
+    mStartupDone.notify_all();
 
     if(video_index < 0 && audio_index < 0)
     {
@@ -1895,7 +2033,7 @@ auto PrettyTime(seconds t) -> std::string
     return fmt::format("{}m{:02}s", duration_cast<minutes>(t).count(), t.count()%60);
 }
 
-int main(al::span<std::string_view> args)
+int main(std::span<std::string_view> args)
 {
     SDL_SetMainReady();
 
@@ -1939,16 +2077,6 @@ int main(al::span<std::string_view> args)
     args = args.subspan(1);
     if(InitAL(args) != 0)
         return 1;
-
-    {
-        ALCdevice *device{alcGetContextsDevice(alcGetCurrentContext())};
-        if(alcIsExtensionPresent(device,"ALC_SOFT_device_clock"))
-        {
-            fmt::println("Found ALC_SOFT_device_clock");
-            alcGetInteger64vSOFT = reinterpret_cast<LPALCGETINTEGER64VSOFT>(
-                alcGetProcAddress(device, "alcGetInteger64vSOFT"));
-        }
-    }
 
     if(alIsExtensionPresent("AL_SOFT_source_latency"))
     {
@@ -2147,5 +2275,5 @@ int main(int argc, char *argv[])
     assert(argc >= 0);
     auto args = std::vector<std::string_view>(static_cast<unsigned int>(argc));
     std::copy_n(argv, args.size(), args.begin());
-    return main(al::span{args});
+    return main(std::span{args});
 }

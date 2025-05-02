@@ -27,13 +27,14 @@
 #include <cstdio>
 #include <cstring>
 #include <memory.h>
+#include <memory>
 #include <mutex>
+#include <span>
 #include <thread>
 #include <vector>
 
 #include "alc/alconfig.h"
 #include "alnumeric.h"
-#include "alsem.h"
 #include "althrd_setname.h"
 #include "core/device.h"
 #include "core/helpers.h"
@@ -48,6 +49,7 @@
 
 namespace {
 
+using namespace std::string_literals;
 using namespace std::string_view_literals;
 
 #if HAVE_DYNLOAD
@@ -159,17 +161,7 @@ struct DeviceEntry {
     std::string mName;
     std::string mPattern;
 
-    DeviceEntry() = default;
-    DeviceEntry(const DeviceEntry&) = default;
-    DeviceEntry(DeviceEntry&&) = default;
-    template<typename T, typename U>
-    DeviceEntry(T&& name, U&& pattern)
-        : mName{std::forward<T>(name)}, mPattern{std::forward<U>(pattern)}
-    { }
     ~DeviceEntry();
-
-    DeviceEntry& operator=(const DeviceEntry&) = default;
-    DeviceEntry& operator=(DeviceEntry&&) = default;
 };
 DeviceEntry::~DeviceEntry() = default;
 
@@ -195,7 +187,8 @@ void EnumerateDevices(jack_client_t *client, std::vector<DeviceEntry> &list)
             if(std::find_if(list.cbegin(), list.cend(), check_name) != list.cend())
                 continue;
 
-            const auto &entry = list.emplace_back(portdev, fmt::format("{}:", portdev));
+            const auto &entry = list.emplace_back(std::string{portdev},
+                fmt::format("{}:", portdev));
             TRACE("Got device: {} = {}", entry.mName, entry.mPattern);
         }
         /* There are ports but couldn't get device names from them. Add a
@@ -204,7 +197,7 @@ void EnumerateDevices(jack_client_t *client, std::vector<DeviceEntry> &list)
         if(ports[0] && list.empty())
         {
             WARN("No device names found in available ports, adding a generic name.");
-            list.emplace_back("JACK"sv, ""sv);
+            list.emplace_back("JACK"s, ""s);
         }
     }
 
@@ -240,7 +233,7 @@ void EnumerateDevices(jack_client_t *client, std::vector<DeviceEntry> &list)
             else
             {
                 /* Otherwise, add a new device entry. */
-                const auto &entry = list.emplace_back(name, pattern);
+                const auto &entry = list.emplace_back(std::string{name}, std::string{pattern});
                 TRACE("Got custom device: {} = {}", entry.mName, entry.mPattern);
             }
 
@@ -306,7 +299,7 @@ struct JackPlayback final : public BackendBase {
     std::atomic<bool> mPlaying{false};
     bool mRTMixing{false};
     RingBufferPtr mRing;
-    al::semaphore mSem;
+    std::atomic<bool> mSignal;
 
     std::atomic<bool> mKillNow{true};
     std::thread mThread;
@@ -338,8 +331,8 @@ int JackPlayback::processRt(jack_nframes_t numframes) noexcept
         outptrs[numchans++] = jack_port_get_buffer(port, numframes);
     }
 
-    const auto dst = al::span{outptrs}.first(numchans);
-    if(mPlaying.load(std::memory_order_acquire)) LIKELY
+    const auto dst = std::span{outptrs}.first(numchans);
+    if(mPlaying.load(std::memory_order_acquire)) [[likely]]
         mDevice->renderSamples(dst, static_cast<uint>(numframes));
     else
     {
@@ -353,8 +346,8 @@ int JackPlayback::processRt(jack_nframes_t numframes) noexcept
 
 int JackPlayback::process(jack_nframes_t numframes) noexcept
 {
-    std::array<al::span<float>,MaxOutputChannels> out;
-    size_t numchans{0};
+    auto out = std::array<std::span<float>,MaxOutputChannels>{};
+    auto numchans = 0_uz;
     for(auto port : mPort)
     {
         if(!port) break;
@@ -362,7 +355,7 @@ int JackPlayback::process(jack_nframes_t numframes) noexcept
     }
 
     size_t total{0};
-    if(mPlaying.load(std::memory_order_acquire)) LIKELY
+    if(mPlaying.load(std::memory_order_acquire)) [[likely]]
     {
         auto data = mRing->getReadVector();
         const auto update_size = size_t{mDevice->mUpdateSize};
@@ -371,7 +364,7 @@ int JackPlayback::process(jack_nframes_t numframes) noexcept
         const auto len1 = size_t{std::min(data[0].len/update_size, outlen)};
         const auto len2 = size_t{std::min(data[1].len/update_size, outlen-len1)};
 
-        auto src = al::span{reinterpret_cast<float*>(data[0].buf), update_size*len1*numchans};
+        auto src = std::span{reinterpret_cast<float*>(data[0].buf), update_size*len1*numchans};
         for(size_t i{0};i < len1;++i)
         {
             for(size_t c{0};c < numchans;++c)
@@ -383,7 +376,7 @@ int JackPlayback::process(jack_nframes_t numframes) noexcept
             total += update_size;
         }
 
-        src = al::span{reinterpret_cast<float*>(data[1].buf), update_size*len2*numchans};
+        src = std::span{reinterpret_cast<float*>(data[1].buf), update_size*len2*numchans};
         for(size_t i{0};i < len2;++i)
         {
             for(size_t c{0};c < numchans;++c)
@@ -396,12 +389,13 @@ int JackPlayback::process(jack_nframes_t numframes) noexcept
         }
 
         mRing->readAdvance(total);
-        mSem.post();
+        mSignal.store(true, std::memory_order_release);
+        mSignal.notify_all();
     }
 
     if(numframes > total)
     {
-        auto clear_buf = [](const al::span<float> outbuf) -> void
+        auto clear_buf = [](const std::span<float> outbuf) -> void
         { std::fill(outbuf.begin(), outbuf.end(), 0.0f); };
         std::for_each(out.begin(), out.begin()+numchans, clear_buf);
     }
@@ -423,7 +417,8 @@ int JackPlayback::mixerProc()
     {
         if(mRing->writeSpace() < update_size)
         {
-            mSem.wait();
+            mSignal.wait(false, std::memory_order_acquire);
+            mSignal.store(false, std::memory_order_release);
             continue;
         }
 
@@ -432,13 +427,13 @@ int JackPlayback::mixerProc()
         const auto len2 = size_t{data[1].len / update_size};
 
         std::lock_guard<std::mutex> dlock{mMutex};
-        auto buffer = al::span{reinterpret_cast<float*>(data[0].buf), data[0].len*num_channels};
+        auto buffer = std::span{reinterpret_cast<float*>(data[0].buf), data[0].len*num_channels};
         auto bufiter = buffer.begin();
         for(size_t i{0};i < len1;++i)
         {
             std::generate_n(outptrs.begin(), outptrs.size(), [&bufiter,update_size]
             {
-                auto ret = al::to_address(bufiter);
+                auto ret = std::to_address(bufiter);
                 bufiter += ptrdiff_t(update_size);
                 return ret;
             });
@@ -446,13 +441,13 @@ int JackPlayback::mixerProc()
         }
         if(len2 > 0)
         {
-            buffer = al::span{reinterpret_cast<float*>(data[1].buf), data[1].len*num_channels};
+            buffer = std::span{reinterpret_cast<float*>(data[1].buf), data[1].len*num_channels};
             bufiter = buffer.begin();
             for(size_t i{0};i < len2;++i)
             {
                 std::generate_n(outptrs.begin(), outptrs.size(), [&bufiter,update_size]
                 {
-                    auto ret = al::to_address(bufiter);
+                    auto ret = std::to_address(bufiter);
                     bufiter += ptrdiff_t(update_size);
                     return ret;
                 });
@@ -546,7 +541,7 @@ bool JackPlayback::reset()
     mDevice->FmtType = DevFmtFloat;
 
     int port_num{0};
-    auto ports = al::span{mPort}.first(mDevice->channelsFromFmt());
+    auto ports = std::span{mPort}.first(mDevice->channelsFromFmt());
     auto bad_port = ports.begin();
     while(bad_port != ports.end())
     {
@@ -651,7 +646,8 @@ void JackPlayback::stop()
         mKillNow.store(true, std::memory_order_release);
         if(mThread.joinable())
         {
-            mSem.post();
+            mSignal.store(true, std::memory_order_release);
+            mSignal.notify_all();
             mThread.join();
         }
 

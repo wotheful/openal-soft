@@ -25,12 +25,12 @@
 #include <cmath>
 #include <complex>
 #include <cstdlib>
+#include <numbers>
+#include <span>
 #include <variant>
 
 #include "alc/effects/base.h"
-#include "alnumbers.h"
 #include "alnumeric.h"
-#include "alspan.h"
 #include "core/ambidefs.h"
 #include "core/bufferline.h"
 #include "core/device.h"
@@ -66,8 +66,8 @@ struct Windower {
         /* Create lookup table of the Hann window for the desired size. */
         for(size_t i{0};i < StftHalfSize;i++)
         {
-            constexpr double scale{al::numbers::pi / double{StftSize}};
-            const double val{std::sin((static_cast<double>(i)+0.5) * scale)};
+            static constexpr auto scale = std::numbers::pi / double{StftSize};
+            const auto val = std::sin((static_cast<double>(i)+0.5) * scale);
             mData[i] = mData[StftSize-1-i] = static_cast<float>(val * val);
         }
     }
@@ -111,8 +111,8 @@ struct PshifterState final : public EffectState {
     void deviceUpdate(const DeviceBase *device, const BufferStorage *buffer) override;
     void update(const ContextBase *context, const EffectSlot *slot, const EffectProps *props,
         const EffectTarget target) override;
-    void process(const size_t samplesToDo, const al::span<const FloatBufferLine> samplesIn,
-        const al::span<FloatBufferLine> samplesOut) override;
+    void process(const size_t samplesToDo, const std::span<const FloatBufferLine> samplesIn,
+        const std::span<FloatBufferLine> samplesOut) override;
 };
 
 void PshifterState::deviceUpdate(const DeviceBase*, const BufferStorage*)
@@ -155,7 +155,7 @@ void PshifterState::update(const ContextBase*, const EffectSlot *slot,
 }
 
 void PshifterState::process(const size_t samplesToDo,
-    const al::span<const FloatBufferLine> samplesIn, const al::span<FloatBufferLine> samplesOut)
+    const std::span<const FloatBufferLine> samplesIn, const std::span<FloatBufferLine> samplesOut)
 {
     /* Pitch shifter engine based on the work of Stephan Bernsee.
      * http://blogs.zynaptiq.com/bernsee/pitch-shifting-using-the-ft/
@@ -164,7 +164,7 @@ void PshifterState::process(const size_t samplesToDo,
     /* Cycle offset per update expected of each frequency bin (bin 0 is none,
      * bin 1 is x1, bin 2 is x2, etc).
      */
-    constexpr float expected_cycles{al::numbers::pi_v<float>*2.0f / OversampleFactor};
+    static constexpr auto expected_cycles = std::numbers::pi_v<float>*2.0f / OversampleFactor;
 
     for(size_t base{0u};base < samplesToDo;)
     {
@@ -192,7 +192,7 @@ void PshifterState::process(const size_t samplesToDo,
             mFftBuffer[k] = mFIFO[src] * gWindow.mData[k];
         for(size_t src{0u}, k{StftSize-mPos};src < mPos;++src,++k)
             mFftBuffer[k] = mFIFO[src] * gWindow.mData[k];
-        mFft.transform_ordered(mFftBuffer.data(), mFftBuffer.data(), mFftWorkBuffer.data(),
+        mFft.transform_ordered(mFftBuffer.begin(), mFftBuffer.begin(), mFftWorkBuffer.begin(),
             PFFFT_FORWARD);
 
         /* Analyze the obtained data. Since the real FFT is symmetric, only
@@ -219,7 +219,7 @@ void PshifterState::process(const size_t samplesToDo,
             mLastPhase[k] = phase;
 
             /* Normalize from pi, and wrap the delta between -1 and +1. */
-            tmp *= al::numbers::inv_pi_v<float>;
+            tmp *= std::numbers::inv_pi_v<float>;
             int qpd{float2int(tmp)};
             tmp -= static_cast<float>(qpd + (qpd%2));
 
@@ -271,10 +271,10 @@ void PshifterState::process(const size_t samplesToDo,
              * grow indefinitely, it will lose precision and produce less exact
              * phase over time.
              */
-            tmp *= al::numbers::inv_pi_v<float>;
+            tmp *= std::numbers::inv_pi_v<float>;
             int qpd{float2int(tmp)};
             tmp -= static_cast<float>(qpd + (qpd%2));
-            mSumPhase[k] = tmp * al::numbers::pi_v<float>;
+            mSumPhase[k] = tmp * std::numbers::pi_v<float>;
 
             const complex_f cplx{std::polar(mSynthesisBuffer[k].Magnitude, mSumPhase[k])};
             if(k == 0)
@@ -291,7 +291,7 @@ void PshifterState::process(const size_t samplesToDo,
         /* Apply an inverse FFT to get the time-domain signal, and accumulate
          * for the output with windowing.
          */
-        mFft.transform_ordered(mFftBuffer.data(), mFftBuffer.data(), mFftWorkBuffer.data(),
+        mFft.transform_ordered(mFftBuffer.begin(), mFftBuffer.begin(), mFftWorkBuffer.begin(),
             PFFFT_BACKWARD);
 
         static constexpr float scale{3.0f / OversampleFactor / StftSize};
@@ -306,7 +306,7 @@ void PshifterState::process(const size_t samplesToDo,
     }
 
     /* Now, mix the processed sound data to the output. */
-    MixSamples(al::span{mBufferOut}.first(samplesToDo), samplesOut, mCurrentGains, mTargetGains,
+    MixSamples(std::span{mBufferOut}.first(samplesToDo), samplesOut, mCurrentGains, mTargetGains,
         std::max(samplesToDo, 512_uz), 0);
 }
 

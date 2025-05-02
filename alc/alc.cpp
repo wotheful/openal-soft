@@ -25,13 +25,13 @@
 #include "version.h"
 
 #ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #endif
 
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <bitset>
 #include <cassert>
 #include <cctype>
@@ -50,7 +50,9 @@
 #include <memory>
 #include <mutex>
 #include <new>
+#include <numbers>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -70,12 +72,9 @@
 #include "al/filter.h"
 #include "al/source.h"
 #include "alc/events.h"
-#include "albit.h"
 #include "alconfig.h"
 #include "almalloc.h"
-#include "alnumbers.h"
 #include "alnumeric.h"
-#include "alspan.h"
 #include "alstring.h"
 #include "alu.h"
 #include "atomic.h"
@@ -102,6 +101,7 @@
 #include "export_list.h"
 #include "flexarray.h"
 #include "fmt/core.h"
+#include "fmt/ranges.h"
 #include "inprogext.h"
 #include "intrusive_ptr.h"
 #include "opthelpers.h"
@@ -415,23 +415,14 @@ void alc_initconfig()
     }
 #endif
 
-    TRACE("Initializing library v{}-{} {}", ALSOFT_VERSION, ALSOFT_GIT_COMMIT_HASH,
-        ALSOFT_GIT_BRANCH);
+    TRACE("Initializing library v{}-{} {}", ALSOFT_VERSION,
+        std::string_view{ALSOFT_GIT_COMMIT_HASH}.empty() ? "unknown" : ALSOFT_GIT_COMMIT_HASH,
+        std::string_view{ALSOFT_GIT_BRANCH}.empty() ? "unknown" : ALSOFT_GIT_BRANCH);
     {
-        std::string names;
-        if(std::size(BackendList) < 1)
-            names = "(none)";
-        else
-        {
-            const al::span<const BackendInfo> infos{BackendList};
-            names = infos[0].name;
-            for(const auto &backend : infos.subspan<1>())
-            {
-                names += ", ";
-                names += backend.name;
-            }
-        }
-        TRACE("Supported backends: {}", names);
+        auto names = std::array<std::string_view,BackendList.size()>{};
+        std::transform(BackendList.begin(), BackendList.end(), names.begin(),
+            std::mem_fn(&BackendInfo::name));
+        TRACE("Supported backends: {}", fmt::join(names, ", "));
     }
     ReadALConfig();
 
@@ -469,14 +460,12 @@ void alc_initconfig()
             auto nextpos = std::min(cpulist.find(','), cpulist.size());
             auto entry = cpulist.substr(0, nextpos);
 
-            while(nextpos < cpulist.size() && cpulist[nextpos] == ',')
-                ++nextpos;
+            nextpos = std::min(cpulist.find_first_not_of(',', nextpos), cpulist.size());
             cpulist.remove_prefix(nextpos);
 
-            while(!entry.empty() && std::isspace(entry.front()))
-                entry.remove_prefix(1);
-            while(!entry.empty() && std::isspace(entry.back()))
-                entry.remove_suffix(1);
+            constexpr auto whitespace_chars = " \t\n\f\r\v"sv;
+            entry.remove_prefix(std::min(entry.find_first_not_of(whitespace_chars), entry.size()));
+            entry.remove_suffix(entry.size() - (entry.find_last_not_of(whitespace_chars)+1));
             if(entry.empty())
                 continue;
 
@@ -608,18 +597,17 @@ void alc_initconfig()
             if(nextpos < drvlist.size())
             {
                 endlist = false;
-                while(nextpos < drvlist.size() && drvlist[nextpos] == ',')
-                    ++nextpos;
+                nextpos = std::min(drvlist.find_first_not_of(',', nextpos), drvlist.size());
             }
             drvlist.remove_prefix(nextpos);
 
-            while(!entry.empty() && std::isspace(entry.front()))
-                entry.remove_prefix(1);
-            const bool delitem{!entry.empty() && entry.front() == '-'};
+            constexpr auto whitespace_chars = " \t\n\f\r\v"sv;
+            entry.remove_prefix(entry.find_first_not_of(whitespace_chars));
+            entry.remove_suffix(entry.size() - (entry.find_last_not_of(whitespace_chars)+1));
+
+            const auto delitem = (!entry.empty() && entry.front() == '-');
             if(delitem) entry.remove_prefix(1);
 
-            while(!entry.empty() && std::isspace(entry.back()))
-                entry.remove_suffix(1);
             if(entry.empty())
                 continue;
 
@@ -662,7 +650,7 @@ void alc_initconfig()
         }
     }
 
-    auto init_backend = [](BackendInfo &backend) -> void
+    std::for_each(BackendList.begin(), BackendListEnd, [](BackendInfo &backend) -> void
     {
         if(PlaybackFactory && CaptureFactory)
             return;
@@ -685,8 +673,7 @@ void alc_initconfig()
             CaptureFactory = &factory;
             TRACE("Added \"{}\" for capture", backend.name);
         }
-    };
-    std::for_each(BackendList.begin(), BackendListEnd, init_backend);
+    });
 
     LoopbackBackendFactory::getFactory().init();
 
@@ -808,9 +795,9 @@ void ProbeCaptureDeviceList()
 }
 
 
-al::span<const ALCint> SpanFromAttributeList(const ALCint *attribs) noexcept
+auto SpanFromAttributeList(const ALCint *attribs) noexcept -> std::span<const ALCint>
 {
-    al::span<const ALCint> attrSpan;
+    auto attrSpan = std::span<const ALCint>{};
     if(attribs)
     {
         const ALCint *attrEnd{attribs};
@@ -987,7 +974,7 @@ ALCenum EnumFromDevAmbi(DevAmbiScaling scaling)
 /* Downmixing channel arrays, to map a device format's missing channels to
  * existing ones. Based on what PipeWire does, though simplified.
  */
-constexpr float inv_sqrt2f{static_cast<float>(1.0 / al::numbers::sqrt2)};
+constexpr float inv_sqrt2f{static_cast<float>(1.0 / std::numbers::sqrt2)};
 constexpr std::array FrontStereo3dB{
     InputRemixMap::TargetMix{FrontLeft, inv_sqrt2f},
     InputRemixMap::TargetMix{FrontRight, inv_sqrt2f}
@@ -1090,7 +1077,7 @@ inline void UpdateClockBase(al::Device *device)
  * Updates device parameters according to the attribute list (caller is
  * responsible for holding the list lock).
  */
-auto UpdateDeviceParams(al::Device *device, const al::span<const int> attrList) -> ALCenum
+auto UpdateDeviceParams(al::Device *device, const std::span<const int> attrList) -> ALCenum
 {
     if(attrList.empty() && device->Type == DeviceType::Loopback)
     {
@@ -1163,7 +1150,7 @@ auto UpdateDeviceParams(al::Device *device, const al::span<const int> attrList) 
                 DevFmtChannels chans;
                 uint8_t order;
             };
-            constexpr std::array chanlist{
+            constexpr auto chanlist = std::array{
                 ChannelMap{"mono"sv,       DevFmtMono,   0},
                 ChannelMap{"stereo"sv,     DevFmtStereo, 0},
                 ChannelMap{"quad"sv,       DevFmtQuad,   0},
@@ -1177,6 +1164,7 @@ auto UpdateDeviceParams(al::Device *device, const al::span<const int> attrList) 
                 ChannelMap{"ambi1"sv, DevFmtAmbi3D, 1},
                 ChannelMap{"ambi2"sv, DevFmtAmbi3D, 2},
                 ChannelMap{"ambi3"sv, DevFmtAmbi3D, 3},
+                ChannelMap{"ambi4"sv, DevFmtAmbi3D, 4},
             };
 
             auto iter = std::find_if(chanlist.begin(), chanlist.end(),
@@ -1215,6 +1203,13 @@ auto UpdateDeviceParams(al::Device *device, const al::span<const int> attrList) 
             }
             else
                 ERR("Unsupported ambi-format: {}", *ambiopt);
+        }
+
+        if(aorder > 3 && (optlayout == DevAmbiLayout::FuMa || optscale == DevAmbiScaling::FuMa))
+        {
+            ERR("FuMa unsupported with {}{} order ambisonics", aorder, GetCounterSuffix(aorder));
+            optlayout = DevAmbiLayout::Default;
+            optscale = DevAmbiScaling::Default;
         }
 
         if(auto hrtfopt = device->configValue<std::string>({}, "hrtf"sv))
@@ -1782,7 +1777,7 @@ auto UpdateDeviceParams(al::Device *device, const al::span<const int> attrList) 
             uint64_t usemask{~sublist.FreeMask};
             while(usemask)
             {
-                const auto idx = static_cast<uint>(al::countr_zero(usemask));
+                const auto idx = static_cast<uint>(std::countr_zero(usemask));
                 auto &slot = (*sublist.EffectSlots)[idx];
                 usemask &= ~(1_u64 << idx);
 
@@ -1813,7 +1808,7 @@ auto UpdateDeviceParams(al::Device *device, const al::span<const int> attrList) 
             uint64_t usemask{~sublist.FreeMask};
             while(usemask)
             {
-                const auto idx = static_cast<uint>(al::countr_zero(usemask));
+                const auto idx = static_cast<uint>(std::countr_zero(usemask));
                 auto &source = (*sublist.Sources)[idx];
                 usemask &= ~(1_u64 << idx);
 
@@ -1828,7 +1823,7 @@ auto UpdateDeviceParams(al::Device *device, const al::span<const int> attrList) 
                     send.GainLF = 1.0f;
                     send.LFReference = HighPassFreqRef;
                 };
-                const auto sends = al::span{source.Send}.subspan(num_sends);
+                const auto sends = std::span{source.Send}.subspan(num_sends);
                 std::for_each(sends.begin(), sends.end(), clear_send);
 
                 source.mPropsDirty = true;
@@ -1839,13 +1834,13 @@ auto UpdateDeviceParams(al::Device *device, const al::span<const int> attrList) 
         auto reset_voice = [device,num_sends,context](Voice *voice)
         {
             /* Clear extraneous property set sends. */
-            const auto sendparams = al::span{voice->mProps.Send}.subspan(num_sends);
+            const auto sendparams = std::span{voice->mProps.Send}.subspan(num_sends);
             std::fill(sendparams.begin(), sendparams.end(), VoiceProps::SendData{});
 
             std::fill(voice->mSend.begin()+num_sends, voice->mSend.end(), Voice::TargetData{});
             auto clear_wetparams = [num_sends](Voice::ChannelData &chandata)
             {
-                const auto wetparams = al::span{chandata.mWetParams}.subspan(num_sends);
+                const auto wetparams = std::span{chandata.mWetParams}.subspan(num_sends);
                 std::fill(wetparams.begin(), wetparams.end(), SendParams{});
             };
             std::for_each(voice->mChans.begin(), voice->mChans.end(), clear_wetparams);
@@ -1875,7 +1870,7 @@ auto UpdateDeviceParams(al::Device *device, const al::span<const int> attrList) 
         UpdateAllEffectSlotProps(context);
         UpdateAllSourceProps(context);
     };
-    auto ctxspan = al::span{*device->mContexts.load()};
+    auto ctxspan = std::span{*device->mContexts.load()};
     std::for_each(ctxspan.begin(), ctxspan.end(), reset_context);
     mixer_mode.leave();
 
@@ -1904,10 +1899,10 @@ auto UpdateDeviceParams(al::Device *device, const al::span<const int> attrList) 
  * Updates device parameters as above, and also first clears the disconnected
  * status, if set.
  */
-auto ResetDeviceParams(al::Device *device, const al::span<const int> attrList) -> bool
+auto ResetDeviceParams(al::Device *device, const std::span<const int> attrList) -> bool
 {
     /* If the device was disconnected, reset it since we're opened anew. */
-    if(!device->Connected.load(std::memory_order_relaxed)) UNLIKELY
+    if(!device->Connected.load(std::memory_order_relaxed))
     {
         /* Make sure disconnection is finished before continuing on. */
         std::ignore = device->waitForMix();
@@ -1940,7 +1935,7 @@ auto ResetDeviceParams(al::Device *device, const al::span<const int> attrList) -
     }
 
     ALCenum err{UpdateDeviceParams(device, attrList)};
-    if(err == ALC_NO_ERROR) LIKELY return ALC_TRUE;
+    if(err == ALC_NO_ERROR) [[likely]] return ALC_TRUE;
 
     alcSetError(device, err);
     return ALC_FALSE;
@@ -1997,7 +1992,7 @@ ContextRef GetContextRef() noexcept
              */
         }
         context = ALCcontext::sGlobalContext.load(std::memory_order_acquire);
-        if(context) LIKELY context->add_ref();
+        if(context) [[likely]] context->add_ref();
         ALCcontext::sGlobalContextLock.store(false, std::memory_order_release);
     }
     return ContextRef{context};
@@ -2047,7 +2042,7 @@ ALC_API void ALC_APIENTRY alcSuspendContext(ALCcontext *context) noexcept
         return;
     }
 
-    if(ctx->mContextFlags.test(ContextFlags::DebugBit)) UNLIKELY
+    if(ctx->mContextFlags.test(ContextFlags::DebugBit)) [[unlikely]]
         ctx->debugMessage(DebugSource::API, DebugType::Portability, 0, DebugSeverity::Medium,
             "alcSuspendContext behavior is not portable -- some implementations suspend all "
             "rendering, some only defer property changes, and some are completely no-op; consider "
@@ -2070,7 +2065,7 @@ ALC_API void ALC_APIENTRY alcProcessContext(ALCcontext *context) noexcept
         return;
     }
 
-    if(ctx->mContextFlags.test(ContextFlags::DebugBit)) UNLIKELY
+    if(ctx->mContextFlags.test(ContextFlags::DebugBit)) [[unlikely]]
         ctx->debugMessage(DebugSource::API, DebugType::Portability, 1, DebugSeverity::Medium,
             "alcProcessContext behavior is not portable -- some implementations resume rendering, "
             "some apply deferred property changes, and some are completely no-op; consider using "
@@ -2140,10 +2135,10 @@ ALC_API auto ALC_APIENTRY alcGetString(ALCdevice *Device, ALCenum param) noexcep
             ProbeAllDevicesList();
 
         /* Copy first entry as default. */
-        if(alcAllDevicesArray.empty())
-            return GetDefaultName();
-
-        alcDefaultAllDevicesSpecifier = alcAllDevicesArray.front();
+        if(!alcAllDevicesArray.empty())
+            alcDefaultAllDevicesSpecifier = alcAllDevicesArray.front();
+        else
+            alcDefaultAllDevicesSpecifier.clear();
         return alcDefaultAllDevicesSpecifier.c_str();
 
     case ALC_CAPTURE_DEFAULT_DEVICE_SPECIFIER:
@@ -2151,10 +2146,10 @@ ALC_API auto ALC_APIENTRY alcGetString(ALCdevice *Device, ALCenum param) noexcep
             ProbeCaptureDeviceList();
 
         /* Copy first entry as default. */
-        if(alcCaptureDeviceArray.empty())
-            return GetDefaultName();
-
-        alcCaptureDefaultDeviceSpecifier = alcCaptureDeviceArray.front();
+        if(!alcCaptureDeviceArray.empty())
+            alcCaptureDefaultDeviceSpecifier = alcCaptureDeviceArray.front();
+        else
+            alcCaptureDefaultDeviceSpecifier.clear();
         return alcCaptureDefaultDeviceSpecifier.c_str();
 
     case ALC_EXTENSIONS:
@@ -2179,7 +2174,7 @@ ALC_API auto ALC_APIENTRY alcGetString(ALCdevice *Device, ALCenum param) noexcep
 }
 
 namespace {
-auto GetIntegerv(al::Device *device, ALCenum param, const al::span<int> values) -> size_t
+auto GetIntegerv(al::Device *device, ALCenum param, const std::span<int> values) -> size_t
 {
     if(values.empty())
     {
@@ -2517,7 +2512,7 @@ ALC_API void ALC_APIENTRY alcGetInteger64vSOFT(ALCdevice *device, ALCenum pname,
         alcSetError(dev.get(), ALC_INVALID_VALUE);
         return;
     }
-    const auto valuespan = al::span{values, static_cast<uint>(size)};
+    const auto valuespan = std::span{values, static_cast<uint>(size)};
     if(!dev || dev->Type == DeviceType::Capture)
     {
         auto ivals = std::vector<int>(valuespan.size());
@@ -2660,17 +2655,18 @@ ALC_API ALCboolean ALC_APIENTRY alcIsExtensionPresent(ALCdevice *device, const A
         return ALC_FALSE;
     }
 
-    const std::string_view tofind{extName};
-    const auto extlist = dev ? std::string_view{GetExtensionList()}
+    const auto tofind = std::string_view{extName};
+    auto extlist = dev ? std::string_view{GetExtensionList()}
         : std::string_view{GetNoDeviceExtList()};
-    auto matchpos = extlist.find(tofind);
-    while(matchpos != std::string_view::npos)
+
+    while(extlist.size() >= tofind.size())
     {
-        const auto endpos = matchpos + tofind.size();
-        if((matchpos == 0 || std::isspace(extlist[matchpos-1]))
-            && (endpos == extlist.size() || std::isspace(extlist[endpos])))
+        const auto endpos = std::min(extlist.find_first_of(' '), extlist.size());
+        if(endpos == tofind.size() && al::case_compare(tofind, extlist.substr(0, endpos)) == 0)
             return ALC_TRUE;
-        matchpos = extlist.find(tofind, matchpos+1);
+
+        const auto nextpos = std::min(extlist.find_first_not_of(' ', endpos), extlist.size());
+        extlist = extlist.substr(nextpos);
     }
     return ALC_FALSE;
 }
@@ -2862,7 +2858,15 @@ ALC_API void ALC_APIENTRY alcDestroyContext(ALCcontext *context) noexcept
 
     auto *Device = ctx->mALDevice.get();
     std::lock_guard<std::mutex> statelock{Device->StateLock};
+
+    const auto stopPlayback = Device->removeContext(ctx.get()) == 0;
     ctx->deinit();
+
+    if(stopPlayback && Device->mDeviceState == DeviceState::Playing)
+    {
+        Device->Backend->stop();
+        Device->mDeviceState = DeviceState::Configured;
+    }
 }
 
 
@@ -2974,14 +2978,13 @@ ALC_API ALCdevice* ALC_APIENTRY alcOpenDevice(const ALCchar *deviceName) noexcep
              * supported by the OpenAL SI. We can't really do anything useful
              * with them, so just ignore.
              */
-            || al::starts_with(devname, "'("sv)
+            || devname.starts_with("'("sv)
             || al::case_compare(devname, "openal-soft"sv) == 0)
             devname = {};
         else
         {
             const auto prefix = GetDevicePrefix();
-            if(!prefix.empty() && devname.size() > prefix.size()
-                && al::starts_with(devname, prefix))
+            if(!prefix.empty() && devname.size() > prefix.size() && devname.starts_with(prefix))
                 devname = devname.substr(prefix.size());
         }
     }
@@ -3086,8 +3089,17 @@ ALC_API ALCboolean ALC_APIENTRY alcCloseDevice(ALCdevice *device) noexcept
     DeviceList.erase(iter);
 
     std::unique_lock<std::mutex> statelock{dev->StateLock};
-    std::vector<ContextRef> orphanctxs;
-    for(ContextBase *ctx : *dev->mContexts.load())
+    if(dev->mDeviceState == DeviceState::Playing)
+    {
+        dev->Backend->stop();
+        dev->mDeviceState = DeviceState::Configured;
+    }
+
+    auto prevarray = dev->mContexts.exchange(al::Device::ContextArray::Create(0));
+    std::ignore = dev->waitForMix();
+
+    auto orphanctxs = std::vector<ContextRef>{};
+    for(ContextBase *ctx : *prevarray)
     {
         auto ctxiter = std::lower_bound(ContextList.begin(), ContextList.end(), ctx);
         if(ctxiter != ContextList.end() && *ctxiter == ctx)
@@ -3097,18 +3109,12 @@ ALC_API ALCboolean ALC_APIENTRY alcCloseDevice(ALCdevice *device) noexcept
         }
     }
     listlock.unlock();
+    prevarray.reset();
 
     for(ContextRef &context : orphanctxs)
     {
         WARN("Releasing orphaned context {}", voidp{context.get()});
         context->deinit();
-    }
-    orphanctxs.clear();
-
-    if(dev->mDeviceState == DeviceState::Playing)
-    {
-        dev->Backend->stop();
-        dev->mDeviceState = DeviceState::Configured;
     }
 
     return ALC_TRUE;
@@ -3144,8 +3150,7 @@ ALC_API ALCdevice* ALC_APIENTRY alcCaptureOpenDevice(const ALCchar *deviceName, 
         else
         {
             const auto prefix = GetDevicePrefix();
-            if(!prefix.empty() && devname.size() > prefix.size()
-                && al::starts_with(devname, prefix))
+            if(!prefix.empty() && devname.size() > prefix.size() && devname.starts_with(prefix))
                 devname = devname.substr(prefix.size());
         }
     }
@@ -3416,9 +3421,9 @@ ALC_API ALCboolean ALC_APIENTRY alcIsRenderFormatSupportedSOFT(ALCdevice *device
 ALC_API void ALC_APIENTRY alcRenderSamplesSOFT(ALCdevice *device, ALCvoid *buffer, ALCsizei samples) noexcept
 {
     auto aldev = dynamic_cast<al::Device*>(device);
-    if(!aldev || aldev->Type != DeviceType::Loopback) UNLIKELY
+    if(!aldev || aldev->Type != DeviceType::Loopback) [[unlikely]]
         alcSetError(aldev, ALC_INVALID_DEVICE);
-    else if(samples < 0 || (samples > 0 && buffer == nullptr)) UNLIKELY
+    else if(samples < 0 || (samples > 0 && buffer == nullptr)) [[unlikely]]
         alcSetError(aldev, ALC_INVALID_VALUE);
     else
         aldev->renderSamples(buffer, static_cast<uint>(samples), aldev->channelsFromFmt());
@@ -3579,8 +3584,7 @@ FORCE_ALIGN ALCboolean ALC_APIENTRY alcReopenDeviceSOFT(ALCdevice *device,
         else
         {
             const auto prefix = GetDevicePrefix();
-            if(!prefix.empty() && devname.size() > prefix.size()
-                && al::starts_with(devname, prefix))
+            if(!prefix.empty() && devname.size() > prefix.size() && devname.starts_with(prefix))
                 devname = devname.substr(prefix.size());
         }
     }

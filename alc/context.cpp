@@ -5,11 +5,13 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <functional>
 #include <iterator>
 #include <numeric>
 #include <optional>
+#include <span>
 #include <string_view>
 #include <tuple>
 #include <utility>
@@ -22,11 +24,9 @@
 #include "al/effect.h"
 #include "al/event.h"
 #include "al/listener.h"
-#include "albit.h"
 #include "alc/alu.h"
 #include "alc/backends/base.h"
 #include "alnumeric.h"
-#include "alspan.h"
 #include "atomic.h"
 #include "core/async_event.h"
 #include "core/devformat.h"
@@ -36,6 +36,8 @@
 #include "core/voice_change.h"
 #include "device.h"
 #include "flexarray.h"
+#include "fmt/core.h"
+#include "fmt/ranges.h"
 #include "ringbuffer.h"
 #include "vecmat.h"
 
@@ -136,7 +138,7 @@ ALCcontext::~ALCcontext()
 
     size_t count{std::accumulate(mSourceList.cbegin(), mSourceList.cend(), 0_uz,
         [](size_t cur, const SourceSubList &sublist) noexcept -> size_t
-        { return cur + static_cast<uint>(al::popcount(~sublist.FreeMask)); })};
+        { return cur + static_cast<uint>(std::popcount(~sublist.FreeMask)); })};
     if(count > 0)
         WARN("{} Source{} not deleted", count, (count==1)?"":"s");
     mSourceList.clear();
@@ -149,7 +151,7 @@ ALCcontext::~ALCcontext()
     mDefaultSlot = nullptr;
     count = std::accumulate(mEffectSlotList.cbegin(), mEffectSlotList.cend(), 0_uz,
         [](size_t cur, const EffectSlotSubList &sublist) noexcept -> size_t
-        { return cur + static_cast<uint>(al::popcount(~sublist.FreeMask)); });
+        { return cur + static_cast<uint>(std::popcount(~sublist.FreeMask)); });
     if(count > 0)
         WARN("{} AuxiliaryEffectSlot{} not deleted", count, (count==1)?"":"s");
     mEffectSlotList.clear();
@@ -202,24 +204,7 @@ void ALCcontext::init()
     eax_initialize_extensions();
 #endif // ALSOFT_EAX
 
-    if(!mExtensions.empty())
-    {
-        const size_t len{std::accumulate(mExtensions.cbegin()+1, mExtensions.cend(),
-            mExtensions.front().length(),
-            [](size_t current, std::string_view ext) noexcept
-            { return current + ext.length() + 1; })};
-
-        std::string extensions;
-        extensions.reserve(len);
-        extensions += mExtensions.front();
-        for(std::string_view ext : al::span{mExtensions}.subspan<1>())
-        {
-            extensions += ' ';
-            extensions += ext;
-        }
-
-        mExtensionsString = std::move(extensions);
-    }
+    mExtensionsString = fmt::format("{}", fmt::join(mExtensions, " "));
 
 #if ALSOFT_EAX
     eax_set_defaults();
@@ -272,39 +257,7 @@ void ALCcontext::deinit()
         }
     }
 
-    bool stopPlayback{};
-    /* First make sure this context exists in the device's list. */
-    auto oldarray = al::span{*mDevice->mContexts.load(std::memory_order_acquire)};
-    if(auto toremove = static_cast<size_t>(std::count(oldarray.begin(), oldarray.end(), this)))
-    {
-        using ContextArray = al::FlexArray<ContextBase*>;
-        const auto newsize = size_t{oldarray.size() - toremove};
-        auto newarray = ContextArray::Create(newsize);
-
-        /* Copy the current/old context handles to the new array, excluding the
-         * given context.
-         */
-        std::copy_if(oldarray.begin(), oldarray.end(), newarray->begin(),
-            [this](ContextBase *ctx) { return ctx != this; });
-
-        /* Store the new context array in the device. Wait for any current mix
-         * to finish before deleting the old array.
-         */
-        auto prevarray = mDevice->mContexts.exchange(std::move(newarray));
-        std::ignore = mDevice->waitForMix();
-
-        stopPlayback = (newsize == 0);
-    }
-    else
-        stopPlayback = oldarray.empty();
-
     StopEventThrd(this);
-
-    if(stopPlayback && mALDevice->mDeviceState == DeviceState::Playing)
-    {
-        mALDevice->Backend->stop();
-        mALDevice->mDeviceState = DeviceState::Configured;
-    }
 }
 
 void ALCcontext::applyAllUpdates()
@@ -337,16 +290,15 @@ void ALCcontext::applyAllUpdates()
 #if ALSOFT_EAX
 namespace {
 
-template<typename F>
-void ForEachSource(ALCcontext *context, F func)
+void ForEachSource(ALCcontext *context, auto&& func)
 {
     for(auto &sublist : context->mSourceList)
     {
         uint64_t usemask{~sublist.FreeMask};
         while(usemask)
         {
-            const auto idx = static_cast<uint>(al::countr_zero(usemask));
-            usemask &= ~(1_u64 << idx);
+            const auto idx = as_unsigned(std::countr_zero(usemask));
+            usemask ^= 1_u64 << idx;
 
             func((*sublist.Sources)[idx]);
         }
@@ -512,7 +464,7 @@ void ALCcontext::eax_initialize()
 
     eax_ensure_compatibility();
     eax_set_defaults();
-    eax_context_commit_air_absorbtion_hf();
+    eax_context_commit_air_absorption_hf();
     eax_update_speaker_configuration();
     eax_initialize_fx_slots();
 
@@ -640,7 +592,7 @@ void ALCcontext::eax_context_set_defaults()
     eax5_context_set_defaults(mEax5);
     mEax = mEax5.i;
     mEaxVersion = 5;
-    mEaxDf = EaxDirtyFlags{};
+    mEaxDf.reset();
 }
 
 void ALCcontext::eax_set_defaults()
@@ -771,7 +723,7 @@ void ALCcontext::eax_context_commit_distance_factor()
     mPropsDirty = true;
 }
 
-void ALCcontext::eax_context_commit_air_absorbtion_hf()
+void ALCcontext::eax_context_commit_air_absorption_hf()
 {
     const auto new_value = level_mb_to_gain(mEax.flAirAbsorptionHF);
 
@@ -832,16 +784,16 @@ void ALCcontext::eax4_defer_all(const EaxCall& call, Eax4State& state)
     dst_d = src;
 
     if(dst_i.guidPrimaryFXSlotID != dst_d.guidPrimaryFXSlotID)
-        mEaxDf |= eax_primary_fx_slot_id_dirty_bit;
+        mEaxDf.set(eax_primary_fx_slot_id_dirty_bit);
 
     if(dst_i.flDistanceFactor != dst_d.flDistanceFactor)
-        mEaxDf |= eax_distance_factor_dirty_bit;
+        mEaxDf.set(eax_distance_factor_dirty_bit);
 
     if(dst_i.flAirAbsorptionHF != dst_d.flAirAbsorptionHF)
-        mEaxDf |= eax_air_absorption_hf_dirty_bit;
+        mEaxDf.set(eax_air_absorption_hf_dirty_bit);
 
     if(dst_i.flHFReference != dst_d.flHFReference)
-        mEaxDf |= eax_hf_reference_dirty_bit;
+        mEaxDf.set(eax_hf_reference_dirty_bit);
 }
 
 void ALCcontext::eax4_defer(const EaxCall& call, Eax4State& state)
@@ -852,20 +804,20 @@ void ALCcontext::eax4_defer(const EaxCall& call, Eax4State& state)
         eax4_defer_all(call, state);
         break;
     case EAXCONTEXT_PRIMARYFXSLOTID:
-        eax_defer<Eax4PrimaryFxSlotIdValidator, eax_primary_fx_slot_id_dirty_bit>(
-            call, state, &EAX40CONTEXTPROPERTIES::guidPrimaryFXSlotID);
+        eax_defer<Eax4PrimaryFxSlotIdValidator, eax_primary_fx_slot_id_dirty_bit>(call, state,
+            &EAX40CONTEXTPROPERTIES::guidPrimaryFXSlotID);
         break;
     case EAXCONTEXT_DISTANCEFACTOR:
-        eax_defer<Eax4DistanceFactorValidator, eax_distance_factor_dirty_bit>(
-            call, state, &EAX40CONTEXTPROPERTIES::flDistanceFactor);
+        eax_defer<Eax4DistanceFactorValidator, eax_distance_factor_dirty_bit>(call, state,
+            &EAX40CONTEXTPROPERTIES::flDistanceFactor);
         break;
     case EAXCONTEXT_AIRABSORPTIONHF:
-        eax_defer<Eax4AirAbsorptionHfValidator, eax_air_absorption_hf_dirty_bit>(
-            call, state, &EAX40CONTEXTPROPERTIES::flAirAbsorptionHF);
+        eax_defer<Eax4AirAbsorptionHfValidator, eax_air_absorption_hf_dirty_bit>(call, state,
+            &EAX40CONTEXTPROPERTIES::flAirAbsorptionHF);
         break;
     case EAXCONTEXT_HFREFERENCE:
-        eax_defer<Eax4HfReferenceValidator, eax_hf_reference_dirty_bit>(
-            call, state, &EAX40CONTEXTPROPERTIES::flHFReference);
+        eax_defer<Eax4HfReferenceValidator, eax_hf_reference_dirty_bit>(call, state,
+            &EAX40CONTEXTPROPERTIES::flHFReference);
         break;
     default:
         eax_set_misc(call);
@@ -882,19 +834,19 @@ void ALCcontext::eax5_defer_all(const EaxCall& call, Eax5State& state)
     dst_d = src;
 
     if(dst_i.guidPrimaryFXSlotID != dst_d.guidPrimaryFXSlotID)
-        mEaxDf |= eax_primary_fx_slot_id_dirty_bit;
+        mEaxDf.set(eax_primary_fx_slot_id_dirty_bit);
 
     if(dst_i.flDistanceFactor != dst_d.flDistanceFactor)
-        mEaxDf |= eax_distance_factor_dirty_bit;
+        mEaxDf.set(eax_distance_factor_dirty_bit);
 
     if(dst_i.flAirAbsorptionHF != dst_d.flAirAbsorptionHF)
-        mEaxDf |= eax_air_absorption_hf_dirty_bit;
+        mEaxDf.set(eax_air_absorption_hf_dirty_bit);
 
     if(dst_i.flHFReference != dst_d.flHFReference)
-        mEaxDf |= eax_hf_reference_dirty_bit;
+        mEaxDf.set(eax_hf_reference_dirty_bit);
 
     if(dst_i.flMacroFXFactor != dst_d.flMacroFXFactor)
-        mEaxDf |= eax_macro_fx_factor_dirty_bit;
+        mEaxDf.set(eax_macro_fx_factor_dirty_bit);
 }
 
 void ALCcontext::eax5_defer(const EaxCall& call, Eax5State& state)
@@ -905,24 +857,24 @@ void ALCcontext::eax5_defer(const EaxCall& call, Eax5State& state)
         eax5_defer_all(call, state);
         break;
     case EAXCONTEXT_PRIMARYFXSLOTID:
-        eax_defer<Eax5PrimaryFxSlotIdValidator, eax_primary_fx_slot_id_dirty_bit>(
-            call, state, &EAX50CONTEXTPROPERTIES::guidPrimaryFXSlotID);
+        eax_defer<Eax5PrimaryFxSlotIdValidator, eax_primary_fx_slot_id_dirty_bit>(call, state,
+            &EAX50CONTEXTPROPERTIES::guidPrimaryFXSlotID);
         break;
     case EAXCONTEXT_DISTANCEFACTOR:
-        eax_defer<Eax4DistanceFactorValidator, eax_distance_factor_dirty_bit>(
-            call, state, &EAX50CONTEXTPROPERTIES::flDistanceFactor);
+        eax_defer<Eax4DistanceFactorValidator, eax_distance_factor_dirty_bit>(call, state,
+            &EAX50CONTEXTPROPERTIES::flDistanceFactor);
         break;
     case EAXCONTEXT_AIRABSORPTIONHF:
-        eax_defer<Eax4AirAbsorptionHfValidator, eax_air_absorption_hf_dirty_bit>(
-            call, state, &EAX50CONTEXTPROPERTIES::flAirAbsorptionHF);
+        eax_defer<Eax4AirAbsorptionHfValidator, eax_air_absorption_hf_dirty_bit>(call, state,
+            &EAX50CONTEXTPROPERTIES::flAirAbsorptionHF);
         break;
     case EAXCONTEXT_HFREFERENCE:
-        eax_defer<Eax4HfReferenceValidator, eax_hf_reference_dirty_bit>(
-            call, state, &EAX50CONTEXTPROPERTIES::flHFReference);
+        eax_defer<Eax4HfReferenceValidator, eax_hf_reference_dirty_bit>(call, state,
+            &EAX50CONTEXTPROPERTIES::flHFReference);
         break;
     case EAXCONTEXT_MACROFXFACTOR:
-        eax_defer<Eax5MacroFxFactorValidator, eax_macro_fx_factor_dirty_bit>(
-            call, state, &EAX50CONTEXTPROPERTIES::flMacroFXFactor);
+        eax_defer<Eax5MacroFxFactorValidator, eax_macro_fx_factor_dirty_bit>(call, state,
+            &EAX50CONTEXTPROPERTIES::flMacroFXFactor);
         break;
     default:
         eax_set_misc(call);
@@ -940,49 +892,49 @@ void ALCcontext::eax_set(const EaxCall& call)
     default: eax_fail_unknown_version();
     }
     if(version != mEaxVersion)
-        mEaxDf = ~EaxDirtyFlags();
+        mEaxDf.set();
     mEaxVersion = version;
 }
 
-void ALCcontext::eax4_context_commit(Eax4State& state, EaxDirtyFlags& dst_df)
+void ALCcontext::eax4_context_commit(Eax4State& state, std::bitset<eax_dirty_bit_count>& dst_df)
 {
-    if(mEaxDf == EaxDirtyFlags{})
+    if(mEaxDf.none())
         return;
 
-    eax_context_commit_property<eax_primary_fx_slot_id_dirty_bit>(
-        state, dst_df, &EAX40CONTEXTPROPERTIES::guidPrimaryFXSlotID);
-    eax_context_commit_property<eax_distance_factor_dirty_bit>(
-        state, dst_df, &EAX40CONTEXTPROPERTIES::flDistanceFactor);
-    eax_context_commit_property<eax_air_absorption_hf_dirty_bit>(
-        state, dst_df, &EAX40CONTEXTPROPERTIES::flAirAbsorptionHF);
-    eax_context_commit_property<eax_hf_reference_dirty_bit>(
-        state, dst_df, &EAX40CONTEXTPROPERTIES::flHFReference);
+    eax_context_commit_property<eax_primary_fx_slot_id_dirty_bit>(state, dst_df,
+        &EAX40CONTEXTPROPERTIES::guidPrimaryFXSlotID);
+    eax_context_commit_property<eax_distance_factor_dirty_bit>(state, dst_df,
+        &EAX40CONTEXTPROPERTIES::flDistanceFactor);
+    eax_context_commit_property<eax_air_absorption_hf_dirty_bit>(state, dst_df,
+        &EAX40CONTEXTPROPERTIES::flAirAbsorptionHF);
+    eax_context_commit_property<eax_hf_reference_dirty_bit>(state, dst_df,
+        &EAX40CONTEXTPROPERTIES::flHFReference);
 
-    mEaxDf = EaxDirtyFlags{};
+    mEaxDf.reset();
 }
 
-void ALCcontext::eax5_context_commit(Eax5State& state, EaxDirtyFlags& dst_df)
+void ALCcontext::eax5_context_commit(Eax5State& state, std::bitset<eax_dirty_bit_count>& dst_df)
 {
-    if(mEaxDf == EaxDirtyFlags{})
+    if(mEaxDf.none())
         return;
 
-    eax_context_commit_property<eax_primary_fx_slot_id_dirty_bit>(
-        state, dst_df, &EAX50CONTEXTPROPERTIES::guidPrimaryFXSlotID);
-    eax_context_commit_property<eax_distance_factor_dirty_bit>(
-        state, dst_df, &EAX50CONTEXTPROPERTIES::flDistanceFactor);
-    eax_context_commit_property<eax_air_absorption_hf_dirty_bit>(
-        state, dst_df, &EAX50CONTEXTPROPERTIES::flAirAbsorptionHF);
-    eax_context_commit_property<eax_hf_reference_dirty_bit>(
-        state, dst_df, &EAX50CONTEXTPROPERTIES::flHFReference);
-    eax_context_commit_property<eax_macro_fx_factor_dirty_bit>(
-        state, dst_df, &EAX50CONTEXTPROPERTIES::flMacroFXFactor);
+    eax_context_commit_property<eax_primary_fx_slot_id_dirty_bit>(state, dst_df,
+        &EAX50CONTEXTPROPERTIES::guidPrimaryFXSlotID);
+    eax_context_commit_property<eax_distance_factor_dirty_bit>(state, dst_df,
+        &EAX50CONTEXTPROPERTIES::flDistanceFactor);
+    eax_context_commit_property<eax_air_absorption_hf_dirty_bit>(state, dst_df,
+        &EAX50CONTEXTPROPERTIES::flAirAbsorptionHF);
+    eax_context_commit_property<eax_hf_reference_dirty_bit>(state, dst_df,
+        &EAX50CONTEXTPROPERTIES::flHFReference);
+    eax_context_commit_property<eax_macro_fx_factor_dirty_bit>(state, dst_df,
+        &EAX50CONTEXTPROPERTIES::flMacroFXFactor);
 
-    mEaxDf = EaxDirtyFlags{};
+    mEaxDf.reset();
 }
 
 void ALCcontext::eax_context_commit()
 {
-    auto dst_df = EaxDirtyFlags{};
+    auto dst_df = std::bitset<eax_dirty_bit_count>{};
 
     switch(mEaxVersion)
     {
@@ -999,25 +951,25 @@ void ALCcontext::eax_context_commit()
         break;
     }
 
-    if(dst_df == EaxDirtyFlags{})
+    if(dst_df.none())
         return;
 
-    if((dst_df & eax_primary_fx_slot_id_dirty_bit) != EaxDirtyFlags{})
+    if(dst_df.test(eax_primary_fx_slot_id_dirty_bit))
         eax_context_commit_primary_fx_slot_id();
 
-    if((dst_df & eax_distance_factor_dirty_bit) != EaxDirtyFlags{})
+    if(dst_df.test(eax_distance_factor_dirty_bit))
         eax_context_commit_distance_factor();
 
-    if((dst_df & eax_air_absorption_hf_dirty_bit) != EaxDirtyFlags{})
-        eax_context_commit_air_absorbtion_hf();
+    if(dst_df.test(eax_air_absorption_hf_dirty_bit))
+        eax_context_commit_air_absorption_hf();
 
-    if((dst_df & eax_hf_reference_dirty_bit) != EaxDirtyFlags{})
+    if(dst_df.test(eax_hf_reference_dirty_bit))
         eax_context_commit_hf_reference();
 
-    if((dst_df & eax_macro_fx_factor_dirty_bit) != EaxDirtyFlags{})
+    if(dst_df.test(eax_macro_fx_factor_dirty_bit))
         eax_context_commit_macro_fx_factor();
 
-    if((dst_df & eax_primary_fx_slot_id_dirty_bit) != EaxDirtyFlags{})
+    if(dst_df.test(eax_primary_fx_slot_id_dirty_bit))
         eax_update_sources();
 }
 
@@ -1034,7 +986,7 @@ FORCE_ALIGN auto AL_APIENTRY EAXSet(const GUID *property_set_id, ALuint property
     ALuint source_id, ALvoid *value, ALuint value_size) noexcept -> ALenum
 {
     auto context = GetContextRef();
-    if(!context) UNLIKELY return AL_INVALID_OPERATION;
+    if(!context) [[unlikely]] return AL_INVALID_OPERATION;
     return EAXSetDirect(context.get(), property_set_id, property_id, source_id, value, value_size);
 }
 
@@ -1057,7 +1009,7 @@ FORCE_ALIGN auto AL_APIENTRY EAXGet(const GUID *property_set_id, ALuint property
     ALuint source_id, ALvoid *value, ALuint value_size) noexcept -> ALenum
 {
     auto context = GetContextRef();
-    if(!context) UNLIKELY return AL_INVALID_OPERATION;
+    if(!context) [[unlikely]] return AL_INVALID_OPERATION;
     return EAXGetDirect(context.get(), property_set_id, property_id, source_id, value, value_size);
 }
 

@@ -21,7 +21,6 @@
 #include "config.h"
 
 #ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #endif
 
@@ -43,7 +42,6 @@
 #include "alnumeric.h"
 #include "core/except.h"
 #include "core/logging.h"
-#include "opthelpers.h"
 #include "strutils.h"
 
 
@@ -84,7 +82,7 @@ void ALCcontext::throw_error_impl(ALenum errorCode, const fmt::string_view fmt,
  */
 AL_API auto AL_APIENTRY alGetError() noexcept -> ALenum
 {
-    if(auto context = GetContextRef()) LIKELY
+    if(auto context = GetContextRef()) [[likely]]
         return alGetErrorDirect(context.get());
 
     auto get_value = [](const char *envname, const char *optname) -> ALenum
@@ -123,7 +121,7 @@ AL_API auto AL_APIENTRY alGetError() noexcept -> ALenum
 FORCE_ALIGN ALenum AL_APIENTRY alGetErrorDirect(ALCcontext *context) noexcept
 {
     ALenum ret{context->mLastThreadError.get()};
-    if(ret != AL_NO_ERROR) UNLIKELY
+    if(ret != AL_NO_ERROR) [[unlikely]]
         context->mLastThreadError.set(AL_NO_ERROR);
     return ret;
 }

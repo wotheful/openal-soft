@@ -7,8 +7,10 @@
 #include <atomic>
 #include <cstring>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -22,7 +24,6 @@
 #include "alc/context.h"
 #include "alc/device.h"
 #include "alnumeric.h"
-#include "alspan.h"
 #include "auxeffectslot.h"
 #include "buffer.h"
 #include "core/except.h"
@@ -194,10 +195,10 @@ constexpr auto GetDebugSeverityName(DebugSeverity severity) noexcept -> std::str
 void ALCcontext::sendDebugMessage(std::unique_lock<std::mutex> &debuglock, DebugSource source,
     DebugType type, ALuint id, DebugSeverity severity, std::string_view message)
 {
-    if(!mDebugEnabled.load(std::memory_order_relaxed)) UNLIKELY
+    if(!mDebugEnabled.load(std::memory_order_relaxed)) [[unlikely]]
         return;
 
-    if(message.length() >= MaxDebugMessageLength) UNLIKELY
+    if(message.length() >= MaxDebugMessageLength) [[unlikely]]
     {
         ERR("Debug message too long ({} >= {}):\n-> {}", message.length(),
             MaxDebugMessageLength, message);
@@ -233,7 +234,7 @@ void ALCcontext::sendDebugMessage(std::unique_lock<std::mutex> &debuglock, Debug
     {
         if(mDebugLog.size() < MaxDebugLoggedMessages)
             mDebugLog.emplace_back(source, type, id, severity, message);
-        else UNLIKELY
+        else [[unlikely]]
             ERR("Debug message log overflow. Lost message:\n"
                 "  Source: {}\n"
                 "  Type: {}\n"
@@ -322,7 +323,7 @@ try {
     static constexpr size_t ElemCount{DebugSourceCount + DebugTypeCount + DebugSeverityCount};
     static constexpr auto Values = make_array_sequence<uint8_t,ElemCount>();
 
-    auto srcIndices = al::span{Values}.subspan(DebugSourceBase,DebugSourceCount);
+    auto srcIndices = std::span{Values}.subspan(DebugSourceBase,DebugSourceCount);
     if(source != AL_DONT_CARE_EXT)
     {
         auto dsource = GetDebugSource(source);
@@ -332,7 +333,7 @@ try {
         srcIndices = srcIndices.subspan(al::to_underlying(*dsource), 1);
     }
 
-    auto typeIndices = al::span{Values}.subspan(DebugTypeBase,DebugTypeCount);
+    auto typeIndices = std::span{Values}.subspan(DebugTypeBase,DebugTypeCount);
     if(type != AL_DONT_CARE_EXT)
     {
         auto dtype = GetDebugType(type);
@@ -341,7 +342,7 @@ try {
         typeIndices = typeIndices.subspan(al::to_underlying(*dtype), 1);
     }
 
-    auto svrIndices = al::span{Values}.subspan(DebugSeverityBase,DebugSeverityCount);
+    auto svrIndices = std::span{Values}.subspan(DebugSeverityBase,DebugSeverityCount);
     if(severity != AL_DONT_CARE_EXT)
     {
         auto dseverity = GetDebugSeverity(severity);
@@ -357,7 +358,7 @@ try {
     {
         const uint filterbase{(1u<<srcIndices[0]) | (1u<<typeIndices[0])};
 
-        for(const uint id : al::span{ids, static_cast<uint>(count)})
+        for(const uint id : std::span{ids, static_cast<uint>(count)})
         {
             const uint64_t filter{filterbase | (uint64_t{id} << 32)};
 
@@ -381,15 +382,15 @@ try {
         };
         auto apply_severity = [apply_filter,svrIndices](const uint filter)
         {
-            std::for_each(svrIndices.cbegin(), svrIndices.cend(),
+            std::for_each(svrIndices.begin(), svrIndices.end(),
                 [apply_filter,filter](const uint idx){ apply_filter(filter | (1<<idx)); });
         };
         auto apply_type = [apply_severity,typeIndices](const uint filter)
         {
-            std::for_each(typeIndices.cbegin(), typeIndices.cend(),
+            std::for_each(typeIndices.begin(), typeIndices.end(),
                 [apply_severity,filter](const uint idx){ apply_severity(filter | (1<<idx)); });
         };
-        std::for_each(srcIndices.cbegin(), srcIndices.cend(),
+        std::for_each(srcIndices.begin(), srcIndices.end(),
             [apply_type](const uint idx){ apply_type(1<<idx); });
     }
 }
@@ -477,12 +478,12 @@ try {
     if(logBuf && logBufSize < 0)
         context->throw_error(AL_INVALID_VALUE, "Negative debug log buffer size");
 
-    const auto sourcesSpan = al::span{sources, sources ? count : 0u};
-    const auto typesSpan = al::span{types, types ? count : 0u};
-    const auto idsSpan = al::span{ids, ids ? count : 0u};
-    const auto severitiesSpan = al::span{severities, severities ? count : 0u};
-    const auto lengthsSpan = al::span{lengths, lengths ? count : 0u};
-    const auto logSpan = al::span{logBuf, logBuf ? static_cast<ALuint>(logBufSize) : 0u};
+    const auto sourcesSpan = std::span{sources, sources ? count : 0u};
+    const auto typesSpan = std::span{types, types ? count : 0u};
+    const auto idsSpan = std::span{ids, ids ? count : 0u};
+    const auto severitiesSpan = std::span{severities, severities ? count : 0u};
+    const auto lengthsSpan = std::span{lengths, lengths ? count : 0u};
+    const auto logSpan = std::span{logBuf, logBuf ? static_cast<ALuint>(logBufSize) : 0u};
 
     auto sourceiter = sourcesSpan.begin();
     auto typeiter = typesSpan.begin();
@@ -499,7 +500,7 @@ try {
 
         auto &entry = context->mDebugLog.front();
         const auto tocopy = size_t{entry.mMessage.size() + 1};
-        if(al::to_address(logiter) != nullptr)
+        if(std::to_address(logiter) != nullptr)
         {
             if(static_cast<size_t>(std::distance(logiter, logSpan.end())) < tocopy)
                 return i;
@@ -507,15 +508,15 @@ try {
             *(logiter++) = '\0';
         }
 
-        if(al::to_address(sourceiter) != nullptr)
+        if(std::to_address(sourceiter) != nullptr)
             *(sourceiter++) = GetDebugSourceEnum(entry.mSource);
-        if(al::to_address(typeiter) != nullptr)
+        if(std::to_address(typeiter) != nullptr)
             *(typeiter++) = GetDebugTypeEnum(entry.mType);
-        if(al::to_address(iditer) != nullptr)
+        if(std::to_address(iditer) != nullptr)
             *(iditer++) = entry.mId;
-        if(al::to_address(severityiter) != nullptr)
+        if(std::to_address(severityiter) != nullptr)
             *(severityiter++) = GetDebugSeverityEnum(entry.mSeverity);
-        if(al::to_address(lengthiter) != nullptr)
+        if(std::to_address(lengthiter) != nullptr)
             *(lengthiter++) = static_cast<ALsizei>(tocopy);
 
         context->mDebugLog.pop_front();
@@ -574,7 +575,7 @@ try {
     if(label && bufSize == 0)
         context->throw_error(AL_INVALID_VALUE, "Zero label bufSize");
 
-    const auto labelOut = al::span{label, label ? static_cast<ALuint>(bufSize) : 0u};
+    const auto labelOut = std::span{label, label ? static_cast<ALuint>(bufSize) : 0u};
     auto copy_name = [name,length,labelOut](std::unordered_map<ALuint,std::string> &names)
     {
         std::string_view objname;

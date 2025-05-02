@@ -46,13 +46,10 @@
 
 namespace {
 
-constexpr std::array B{
-    std::array{   0.0f,     0.0f,    0.0f,    0.0f},
-    std::array{   1.0f,     0.0f,    0.0f,    0.0f},
-    std::array{   3.0f,     3.0f,    0.0f,    0.0f},
-    std::array{3.6778f,  6.4595f, 2.3222f,    0.0f},
-    std::array{4.2076f, 11.4877f, 5.7924f, 9.1401f}
-};
+constexpr auto B1 = std::array{   1.0f};
+constexpr auto B2 = std::array{   3.0f,     3.0f};
+constexpr auto B3 = std::array{3.6778f,  6.4595f, 2.3222f};
+constexpr auto B4 = std::array{4.2076f, 11.4877f, 5.7924f, 9.1401f};
 
 NfcFilter1 NfcFilterCreate1(const float w0, const float w1) noexcept
 {
@@ -60,7 +57,7 @@ NfcFilter1 NfcFilterCreate1(const float w0, const float w1) noexcept
 
     /* Calculate bass-cut coefficients. */
     auto r = 0.5f * w1;
-    auto b_00 = B[1][0] * r;
+    auto b_00 = B1[0] * r;
     auto g_0 = 1.0f + b_00;
 
     nfc.base_gain = 1.0f / g_0;
@@ -68,7 +65,7 @@ NfcFilter1 NfcFilterCreate1(const float w0, const float w1) noexcept
 
     /* Calculate bass-boost coefficients. */
     r = 0.5f * w0;
-    b_00 = B[1][0] * r;
+    b_00 = B1[0] * r;
     g_0 = 1.0f + b_00;
 
     nfc.gain = nfc.base_gain * g_0;
@@ -80,7 +77,7 @@ NfcFilter1 NfcFilterCreate1(const float w0, const float w1) noexcept
 void NfcFilterAdjust1(NfcFilter1 *nfc, const float w0) noexcept
 {
     const auto r = 0.5f * w0;
-    const auto b_00 = B[1][0] * r;
+    const auto b_00 = B1[0] * r;
     const auto g_0 = 1.0f + b_00;
 
     nfc->gain = nfc->base_gain * g_0;
@@ -94,8 +91,8 @@ NfcFilter2 NfcFilterCreate2(const float w0, const float w1) noexcept
 
     /* Calculate bass-cut coefficients. */
     auto r = 0.5f * w1;
-    auto b_10 = B[2][0] * r;
-    auto b_11 = B[2][1] * (r*r);
+    auto b_10 = B2[0] * r;
+    auto b_11 = B2[1] * (r*r);
     auto g_1 = 1.0f + b_10 + b_11;
 
     nfc.base_gain = 1.0f / g_1;
@@ -104,8 +101,8 @@ NfcFilter2 NfcFilterCreate2(const float w0, const float w1) noexcept
 
     /* Calculate bass-boost coefficients. */
     r = 0.5f * w0;
-    b_10 = B[2][0] * r;
-    b_11 = B[2][1] * r * r;
+    b_10 = B2[0] * r;
+    b_11 = B2[1] * r * r;
     g_1 = 1.0f + b_10 + b_11;
 
     nfc.gain = nfc.base_gain * g_1;
@@ -118,8 +115,8 @@ NfcFilter2 NfcFilterCreate2(const float w0, const float w1) noexcept
 void NfcFilterAdjust2(NfcFilter2 *nfc, const float w0) noexcept
 {
     const auto r = 0.5f * w0;
-    const auto b_10 = B[2][0] * r;
-    const auto b_11 = B[2][1] * (r*r);
+    const auto b_10 = B2[0] * r;
+    const auto b_11 = B2[1] * (r*r);
     const auto g_1 = 1.0f + b_10 + b_11;
 
     nfc->gain = nfc->base_gain * g_1;
@@ -134,9 +131,9 @@ NfcFilter3 NfcFilterCreate3(const float w0, const float w1) noexcept
 
     /* Calculate bass-cut coefficients. */
     auto r = 0.5f * w1;
-    auto b_10 = B[3][0] * r;
-    auto b_11 = B[3][1] * (r*r);
-    auto b_00 = B[3][2] * r;
+    auto b_10 = B3[0] * r;
+    auto b_11 = B3[1] * (r*r);
+    auto b_00 = B3[2] * r;
     auto g_1 = 1.0f + b_10 + b_11;
     auto g_0 = 1.0f + b_00;
 
@@ -147,9 +144,9 @@ NfcFilter3 NfcFilterCreate3(const float w0, const float w1) noexcept
 
     /* Calculate bass-boost coefficients. */
     r = 0.5f * w0;
-    b_10 = B[3][0] * r;
-    b_11 = B[3][1] * (r*r);
-    b_00 = B[3][2] * r;
+    b_10 = B3[0] * r;
+    b_11 = B3[1] * (r*r);
+    b_00 = B3[2] * r;
     g_1 = 1.0f + b_10 + b_11;
     g_0 = 1.0f + b_00;
 
@@ -164,9 +161,9 @@ NfcFilter3 NfcFilterCreate3(const float w0, const float w1) noexcept
 void NfcFilterAdjust3(NfcFilter3 *nfc, const float w0) noexcept
 {
     const auto r = 0.5f * w0;
-    const auto b_10 = B[3][0] * r;
-    const auto b_11 = B[3][1] * (r*r);
-    const auto b_00 = B[3][2] * r;
+    const auto b_10 = B3[0] * r;
+    const auto b_11 = B3[1] * (r*r);
+    const auto b_00 = B3[2] * r;
     const auto g_1 = 1.0f + b_10 + b_11;
     const auto g_0 = 1.0f + b_00;
 
@@ -183,10 +180,10 @@ NfcFilter4 NfcFilterCreate4(const float w0, const float w1) noexcept
 
     /* Calculate bass-cut coefficients. */
     auto r = 0.5f * w1;
-    auto b_10 = B[4][0] * r;
-    auto b_11 = B[4][1] * (r*r);
-    auto b_00 = B[4][2] * r;
-    auto b_01 = B[4][3] * (r*r);
+    auto b_10 = B4[0] * r;
+    auto b_11 = B4[1] * (r*r);
+    auto b_00 = B4[2] * r;
+    auto b_01 = B4[3] * (r*r);
     auto g_1 = 1.0f + b_10 + b_11;
     auto g_0 = 1.0f + b_00 + b_01;
 
@@ -198,10 +195,10 @@ NfcFilter4 NfcFilterCreate4(const float w0, const float w1) noexcept
 
     /* Calculate bass-boost coefficients. */
     r = 0.5f * w0;
-    b_10 = B[4][0] * r;
-    b_11 = B[4][1] * (r*r);
-    b_00 = B[4][2] * r;
-    b_01 = B[4][3] * (r*r);
+    b_10 = B4[0] * r;
+    b_11 = B4[1] * (r*r);
+    b_00 = B4[2] * r;
+    b_01 = B4[3] * (r*r);
     g_1 = 1.0f + b_10 + b_11;
     g_0 = 1.0f + b_00 + b_01;
 
@@ -217,10 +214,10 @@ NfcFilter4 NfcFilterCreate4(const float w0, const float w1) noexcept
 void NfcFilterAdjust4(NfcFilter4 *nfc, const float w0) noexcept
 {
     const auto r = 0.5f * w0;
-    const auto b_10 = B[4][0] * r;
-    const auto b_11 = B[4][1] * (r*r);
-    const auto b_00 = B[4][2] * r;
-    const auto b_01 = B[4][3] * (r*r);
+    const auto b_10 = B4[0] * r;
+    const auto b_11 = B4[1] * (r*r);
+    const auto b_00 = B4[2] * r;
+    const auto b_01 = B4[3] * (r*r);
     const auto g_1 = 1.0f + b_10 + b_11;
     const auto g_0 = 1.0f + b_00 + b_01;
 
@@ -250,7 +247,7 @@ void NfcFilter::adjust(const float w0) noexcept
 }
 
 
-void NfcFilter::process1(const al::span<const float> src, const al::span<float> dst)
+void NfcFilter::process1(const std::span<const float> src, const std::span<float> dst)
 {
     const float gain{first.gain};
     const float b1{first.b1};
@@ -263,11 +260,11 @@ void NfcFilter::process1(const al::span<const float> src, const al::span<float> 
         z1 += y;
         return out;
     };
-    std::transform(src.cbegin(), src.cend(), dst.begin(), proc_sample);
+    std::transform(src.begin(), src.end(), dst.begin(), proc_sample);
     first.z[0] = z1;
 }
 
-void NfcFilter::process2(const al::span<const float> src, const al::span<float> dst)
+void NfcFilter::process2(const std::span<const float> src, const std::span<float> dst)
 {
     const float gain{second.gain};
     const float b1{second.b1};
@@ -284,12 +281,12 @@ void NfcFilter::process2(const al::span<const float> src, const al::span<float> 
         z1 += y;
         return out;
     };
-    std::transform(src.cbegin(), src.cend(), dst.begin(), proc_sample);
+    std::transform(src.begin(), src.end(), dst.begin(), proc_sample);
     second.z[0] = z1;
     second.z[1] = z2;
 }
 
-void NfcFilter::process3(const al::span<const float> src, const al::span<float> dst)
+void NfcFilter::process3(const std::span<const float> src, const std::span<float> dst)
 {
     const float gain{third.gain};
     const float b1{third.b1};
@@ -313,13 +310,13 @@ void NfcFilter::process3(const al::span<const float> src, const al::span<float> 
         z3 += y;
         return out;
     };
-    std::transform(src.cbegin(), src.cend(), dst.begin(), proc_sample);
+    std::transform(src.begin(), src.end(), dst.begin(), proc_sample);
     third.z[0] = z1;
     third.z[1] = z2;
     third.z[2] = z3;
 }
 
-void NfcFilter::process4(const al::span<const float> src, const al::span<float> dst)
+void NfcFilter::process4(const std::span<const float> src, const std::span<float> dst)
 {
     const float gain{fourth.gain};
     const float b1{fourth.b1};
@@ -347,7 +344,7 @@ void NfcFilter::process4(const al::span<const float> src, const al::span<float> 
         z3 += y;
         return out;
     };
-    std::transform(src.cbegin(), src.cend(), dst.begin(), proc_sample);
+    std::transform(src.begin(), src.end(), dst.begin(), proc_sample);
     fourth.z[0] = z1;
     fourth.z[1] = z2;
     fourth.z[2] = z3;

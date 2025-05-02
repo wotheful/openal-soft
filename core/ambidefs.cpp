@@ -3,14 +3,26 @@
 
 #include "ambidefs.h"
 
-#include "alnumbers.h"
+#include <algorithm>
+#include <functional>
+#include <numbers>
+#include <span>
 
 
 namespace {
 
+static_assert(AmbiScale::FromN3D.size() == MaxAmbiChannels);
+static_assert(AmbiScale::FromSN3D.size() == MaxAmbiChannels);
+static_assert(AmbiScale::FromFuMa.size() == MaxAmbiChannels);
+static_assert(AmbiScale::FromUHJ.size() == MaxAmbiChannels);
+
+static_assert(AmbiIndex::FromFuMa.size() == MaxAmbiChannels);
+static_assert(AmbiIndex::FromFuMa2D.size() == MaxAmbi2DChannels);
+
+
 using AmbiChannelFloatArray = std::array<float,MaxAmbiChannels>;
 
-constexpr auto inv_sqrt3f = static_cast<float>(1.0/al::numbers::sqrt3);
+constexpr auto inv_sqrt3f = static_cast<float>(1.0/std::numbers::sqrt3);
 
 
 /* These HF gains are derived from the same 32-point speaker array. The scale
@@ -21,11 +33,11 @@ constexpr auto inv_sqrt3f = static_cast<float>(1.0/al::numbers::sqrt3);
  * if it was a first-order decoder for that same speaker array.
  */
 constexpr std::array HFScales{
-    std::array{4.000000000e+00f, 2.309401077e+00f, 1.192569588e+00f, 7.189495850e-01f},
-    std::array{4.000000000e+00f, 2.309401077e+00f, 1.192569588e+00f, 7.189495850e-01f},
-    std::array{2.981423970e+00f, 2.309401077e+00f, 1.192569588e+00f, 7.189495850e-01f},
-    std::array{2.359168820e+00f, 2.031565936e+00f, 1.444598386e+00f, 7.189495850e-01f},
-    /*std::array{1.947005434e+00f, 1.764337084e+00f, 1.424707344e+00f, 9.755104127e-01f, 4.784482742e-01f}, */
+    std::array{4.000000000e+00f, 2.309401077e+00f, 1.192569588e+00f, 7.189495850e-01f, 4.784482742e-01f},
+    std::array{4.000000000e+00f, 2.309401077e+00f, 1.192569588e+00f, 7.189495850e-01f, 4.784482742e-01f},
+    std::array{2.981423970e+00f, 2.309401077e+00f, 1.192569588e+00f, 7.189495850e-01f, 4.784482742e-01f},
+    std::array{2.359168820e+00f, 2.031565936e+00f, 1.444598386e+00f, 7.189495850e-01f, 4.784482742e-01f},
+    std::array{1.947005434e+00f, 1.764337084e+00f, 1.424707344e+00f, 9.755104127e-01f, 4.784482742e-01f},
 };
 
 /* Same as above, but using a 10-point horizontal-only speaker array. Should
@@ -33,11 +45,11 @@ constexpr std::array HFScales{
  * output.
  */
 constexpr std::array HFScales2D{
-    std::array{2.236067977e+00f, 1.581138830e+00f, 9.128709292e-01f, 6.050756345e-01f},
-    std::array{2.236067977e+00f, 1.581138830e+00f, 9.128709292e-01f, 6.050756345e-01f},
-    std::array{1.825741858e+00f, 1.581138830e+00f, 9.128709292e-01f, 6.050756345e-01f},
-    std::array{1.581138830e+00f, 1.460781803e+00f, 1.118033989e+00f, 6.050756345e-01f},
-    /*std::array{1.414213562e+00f, 1.344997024e+00f, 1.144122806e+00f, 8.312538756e-01f, 4.370160244e-01f}, */
+    std::array{2.236067977e+00f, 1.581138830e+00f, 9.128709292e-01f, 6.050756345e-01f, 4.370160244e-01f},
+    std::array{2.236067977e+00f, 1.581138830e+00f, 9.128709292e-01f, 6.050756345e-01f, 4.370160244e-01f},
+    std::array{1.825741858e+00f, 1.581138830e+00f, 9.128709292e-01f, 6.050756345e-01f, 4.370160244e-01f},
+    std::array{1.581138830e+00f, 1.460781803e+00f, 1.118033989e+00f, 6.050756345e-01f, 4.370160244e-01f},
+    std::array{1.414213562e+00f, 1.344997024e+00f, 1.144122806e+00f, 8.312538756e-01f, 4.370160244e-01f},
 };
 
 
@@ -264,7 +276,7 @@ template<size_t N, size_t M>
 constexpr auto CalcAmbiUpsampler(const std::array<std::array<float,N>,M> &decoder,
     const std::array<AmbiChannelFloatArray,M> &encoder)
 {
-    std::array<AmbiChannelFloatArray,N> res{};
+    auto res = std::array<AmbiChannelFloatArray,N>{};
 
     for(size_t i{0};i < decoder[0].size();++i)
     {
@@ -282,30 +294,23 @@ constexpr auto CalcAmbiUpsampler(const std::array<std::array<float,N>,M> &decode
 
 } // namespace
 
-const std::array<std::array<float,MaxAmbiChannels>,4> AmbiScale::FirstOrderUp{CalcAmbiUpsampler(FirstOrderDecoder, FirstOrderEncoder)};
-const std::array<std::array<float,MaxAmbiChannels>,4> AmbiScale::FirstOrder2DUp{CalcAmbiUpsampler(FirstOrder2DDecoder, FirstOrder2DEncoder)};
-const std::array<std::array<float,MaxAmbiChannels>,9> AmbiScale::SecondOrderUp{CalcAmbiUpsampler(SecondOrderDecoder, SecondOrderEncoder)};
-const std::array<std::array<float,MaxAmbiChannels>,9> AmbiScale::SecondOrder2DUp{CalcAmbiUpsampler(SecondOrder2DDecoder, SecondOrder2DEncoder)};
-const std::array<std::array<float,MaxAmbiChannels>,16> AmbiScale::ThirdOrderUp{CalcAmbiUpsampler(ThirdOrderDecoder, ThirdOrderEncoder)};
-const std::array<std::array<float,MaxAmbiChannels>,16> AmbiScale::ThirdOrder2DUp{CalcAmbiUpsampler(ThirdOrder2DDecoder, ThirdOrder2DEncoder)};
-const std::array<std::array<float,MaxAmbiChannels>,25> AmbiScale::FourthOrder2DUp{CalcAmbiUpsampler(FourthOrder2DDecoder, FourthOrder2DEncoder)};
+constinit const std::array<AmbiChannelFloatArray,4> AmbiScale::FirstOrderUp{CalcAmbiUpsampler(FirstOrderDecoder, FirstOrderEncoder)};
+constinit const std::array<AmbiChannelFloatArray,4> AmbiScale::FirstOrder2DUp{CalcAmbiUpsampler(FirstOrder2DDecoder, FirstOrder2DEncoder)};
+constinit const std::array<AmbiChannelFloatArray,9> AmbiScale::SecondOrderUp{CalcAmbiUpsampler(SecondOrderDecoder, SecondOrderEncoder)};
+constinit const std::array<AmbiChannelFloatArray,9> AmbiScale::SecondOrder2DUp{CalcAmbiUpsampler(SecondOrder2DDecoder, SecondOrder2DEncoder)};
+constinit const std::array<AmbiChannelFloatArray,16> AmbiScale::ThirdOrderUp{CalcAmbiUpsampler(ThirdOrderDecoder, ThirdOrderEncoder)};
+constinit const std::array<AmbiChannelFloatArray,16> AmbiScale::ThirdOrder2DUp{CalcAmbiUpsampler(ThirdOrder2DDecoder, ThirdOrder2DEncoder)};
+constinit const std::array<AmbiChannelFloatArray,25> AmbiScale::FourthOrder2DUp{CalcAmbiUpsampler(FourthOrder2DDecoder, FourthOrder2DEncoder)};
 
 
-std::array<float,MaxAmbiOrder+1> AmbiScale::GetHFOrderScales(const uint src_order,
-    const uint dev_order, const bool horizontalOnly) noexcept
+auto AmbiScale::GetHFOrderScales(const uint src_order, const uint dev_order,
+    const bool horizontalOnly) noexcept -> std::array<float,MaxAmbiOrder+1>
 {
-    std::array<float,MaxAmbiOrder+1> res{};
+    auto res = std::array<float,MaxAmbiOrder+1>{};
 
-    if(!horizontalOnly)
-    {
-        for(size_t i{0};i < MaxAmbiOrder+1;++i)
-            res[i] = HFScales[src_order][i] / HFScales[dev_order][i];
-    }
-    else
-    {
-        for(size_t i{0};i < MaxAmbiOrder+1;++i)
-            res[i] = HFScales2D[src_order][i] / HFScales2D[dev_order][i];
-    }
+    const auto scales = horizontalOnly ? std::span{HFScales2D} : std::span{HFScales};
+    std::transform(scales[src_order].begin(), scales[src_order].end(), scales[dev_order].begin(),
+        res.begin(), std::divides{});
 
     return res;
 }

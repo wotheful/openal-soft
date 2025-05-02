@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -35,6 +36,7 @@
 #include <mutex>
 #include <numeric>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
@@ -44,13 +46,11 @@
 #include "AL/alc.h"
 #include "AL/alext.h"
 
-#include "albit.h"
 #include "alc/context.h"
 #include "alc/device.h"
 #include "alc/inprogext.h"
 #include "almalloc.h"
 #include "alnumeric.h"
-#include "alspan.h"
 #include "core/device.h"
 #include "core/except.h"
 #include "core/logging.h"
@@ -184,11 +184,11 @@ auto EnsureBuffers(al::Device *device, size_t needed) noexcept -> bool
 try {
     size_t count{std::accumulate(device->BufferList.cbegin(), device->BufferList.cend(), 0_uz,
         [](size_t cur, const BufferSubList &sublist) noexcept -> size_t
-        { return cur + static_cast<ALuint>(al::popcount(sublist.FreeMask)); })};
+        { return cur + static_cast<ALuint>(std::popcount(sublist.FreeMask)); })};
 
     while(needed > count)
     {
-        if(device->BufferList.size() >= 1<<25) UNLIKELY
+        if(device->BufferList.size() >= 1<<25) [[unlikely]]
             return false;
 
         BufferSubList sublist{};
@@ -210,10 +210,10 @@ auto AllocBuffer(al::Device *device) noexcept -> ALbuffer*
         [](const BufferSubList &entry) noexcept -> bool
         { return entry.FreeMask != 0; });
     auto lidx = static_cast<ALuint>(std::distance(device->BufferList.begin(), sublist));
-    auto slidx = static_cast<ALuint>(al::countr_zero(sublist->FreeMask));
+    auto slidx = static_cast<ALuint>(std::countr_zero(sublist->FreeMask));
     ASSUME(slidx < 64);
 
-    ALbuffer *buffer{al::construct_at(al::to_address(sublist->Buffers->begin() + slidx))};
+    ALbuffer *buffer{std::construct_at(std::to_address(sublist->Buffers->begin() + slidx))};
 
     /* Add 1 to avoid buffer ID 0. */
     buffer->id = ((lidx<<6) | slidx) + 1;
@@ -246,12 +246,12 @@ auto LookupBuffer(al::Device *device, ALuint id) noexcept -> ALbuffer*
     const size_t lidx{(id-1) >> 6};
     const ALuint slidx{(id-1) & 0x3f};
 
-    if(lidx >= device->BufferList.size()) UNLIKELY
+    if(lidx >= device->BufferList.size()) [[unlikely]]
         return nullptr;
     BufferSubList &sublist = device->BufferList[lidx];
-    if(sublist.FreeMask & (1_u64 << slidx)) UNLIKELY
+    if(sublist.FreeMask & (1_u64 << slidx)) [[unlikely]]
         return nullptr;
-    return al::to_address(sublist.Buffers->begin() + slidx);
+    return std::to_address(sublist.Buffers->begin() + slidx);
 }
 
 [[nodiscard]]
@@ -291,7 +291,7 @@ constexpr auto SanitizeAlignment(FmtType type, ALuint align) noexcept -> ALuint
 
 /** Loads the specified data into the buffer, using the specified format. */
 void LoadData(ALCcontext *context, ALbuffer *ALBuf, ALsizei freq, ALuint size,
-    const FmtChannels DstChannels, const FmtType DstType, const al::span<const std::byte> SrcData,
+    const FmtChannels DstChannels, const FmtType DstType, const std::span<const std::byte> SrcData,
     ALbitfieldSOFT access)
 {
     if(ALBuf->ref.load(std::memory_order_relaxed) != 0 || ALBuf->MappedAccess != 0)
@@ -535,7 +535,7 @@ void PrepareUserPtr(ALCcontext *context [[maybe_unused]], ALbuffer *ALBuf, ALsiz
 #endif
 
     decltype(ALBuf->mDataStorage){}.swap(ALBuf->mDataStorage);
-    ALBuf->mData = al::span{sdata, sdatalen};
+    ALBuf->mData = {sdata, sdatalen};
 
 #if ALSOFT_EAX
     eax_x_ram_clear(*context->mALDevice, *ALBuf);
@@ -638,7 +638,7 @@ auto DecomposeUserFormat(ALenum format) noexcept -> std::optional<DecompResult>
 
         FormatMap{AL_FORMAT_BFORMAT3D_8,       {FmtBFormat3D, FmtUByte}},
         FormatMap{AL_FORMAT_BFORMAT3D_16,      {FmtBFormat3D, FmtShort}},
-        FormatMap{AL_FORMAT_BFORMAT2D_I32,     {FmtBFormat3D, FmtInt}  },
+        FormatMap{AL_FORMAT_BFORMAT3D_I32,     {FmtBFormat3D, FmtInt}  },
         FormatMap{AL_FORMAT_BFORMAT3D_FLOAT32, {FmtBFormat3D, FmtFloat}},
         FormatMap{AL_FORMAT_BFORMAT3D_MULAW,   {FmtBFormat3D, FmtMulaw}},
 
@@ -681,12 +681,12 @@ FORCE_ALIGN void AL_APIENTRY alGenBuffersDirect(ALCcontext *context, ALsizei n, 
 try {
     if(n < 0)
         context->throw_error(AL_INVALID_VALUE, "Generating {} buffers", n);
-    if(n <= 0) UNLIKELY return;
+    if(n <= 0) [[unlikely]] return;
 
     auto *device = context->mALDevice.get();
     auto buflock = std::lock_guard{device->BufferLock};
 
-    const al::span bids{buffers, static_cast<ALuint>(n)};
+    const auto bids = std::span{buffers, static_cast<ALuint>(n)};
     if(!EnsureBuffers(device, bids.size()))
         context->throw_error(AL_OUT_OF_MEMORY, "Failed to allocate {} buffer{}", n,
             (n==1) ? "" : "s");
@@ -705,7 +705,7 @@ FORCE_ALIGN void AL_APIENTRY alDeleteBuffersDirect(ALCcontext *context, ALsizei 
 try {
     if(n < 0)
         context->throw_error(AL_INVALID_VALUE, "Deleting {} buffers", n);
-    if(n <= 0) UNLIKELY return;
+    if(n <= 0) [[unlikely]] return;
 
     auto *device = context->mALDevice.get();
     auto buflock = std::lock_guard{device->BufferLock};
@@ -721,7 +721,7 @@ try {
             context->throw_error(AL_INVALID_OPERATION, "Deleting in-use buffer {}", bid);
     };
 
-    const al::span bids{buffers, static_cast<ALuint>(n)};
+    const auto bids = std::span{buffers, static_cast<ALuint>(n)};
     std::for_each(bids.begin(), bids.end(), validate_buffer);
 
     /* All good. Delete non-0 buffer IDs. */
@@ -752,7 +752,7 @@ FORCE_ALIGN ALboolean AL_APIENTRY alIsBufferDirect(ALCcontext *context, ALuint b
 AL_API void AL_APIENTRY alBufferData(ALuint buffer, ALenum format, const ALvoid *data, ALsizei size, ALsizei freq) noexcept
 {
     auto context = GetContextRef();
-    if(!context) UNLIKELY return;
+    if(!context) [[unlikely]] return;
     alBufferStorageDirectSOFT(context.get(), buffer, format, data, size, freq, 0);
 }
 
@@ -786,7 +786,7 @@ try {
 
     auto bdata = static_cast<const std::byte*>(data);
     LoadData(context, albuf, freq, static_cast<ALuint>(size), usrfmt->channels, usrfmt->type,
-        al::span{bdata, bdata ? static_cast<ALuint>(size) : 0u}, flags);
+        std::span{bdata, bdata ? static_cast<ALuint>(size) : 0u}, flags);
 }
 catch(al::base_exception&) {
 }
@@ -1166,7 +1166,7 @@ try {
     switch(param)
     {
     case AL_LOOP_POINTS_SOFT:
-        auto vals = al::span{values, 2_uz};
+        const auto vals = std::span{values, 2_uz};
         if(albuf->ref.load(std::memory_order_relaxed) != 0)
             context->throw_error(AL_INVALID_OPERATION, "Modifying in-use buffer {}'s loop points",
                 buffer);
@@ -1395,7 +1395,7 @@ try {
     switch(param)
     {
     case AL_LOOP_POINTS_SOFT:
-        auto vals = al::span{values, 2_uz};
+        const auto vals = std::span{values, 2_uz};
         vals[0] = static_cast<ALint>(albuf->mLoopStart);
         vals[1] = static_cast<ALint>(albuf->mLoopEnd);
         return;
@@ -1526,7 +1526,7 @@ AL_API void AL_APIENTRY alBufferSamplesSOFT(ALuint /*buffer*/, ALuint /*samplera
     const ALvoid* /*data*/) noexcept
 {
     ContextRef context{GetContextRef()};
-    if(!context) UNLIKELY return;
+    if(!context) [[unlikely]] return;
 
     context->setError(AL_INVALID_OPERATION, "alBufferSamplesSOFT not supported");
 }
@@ -1535,7 +1535,7 @@ AL_API void AL_APIENTRY alBufferSubSamplesSOFT(ALuint /*buffer*/, ALsizei /*offs
     ALsizei /*samples*/, ALenum /*channels*/, ALenum /*type*/, const ALvoid* /*data*/) noexcept
 {
     ContextRef context{GetContextRef()};
-    if(!context) UNLIKELY return;
+    if(!context) [[unlikely]] return;
 
     context->setError(AL_INVALID_OPERATION, "alBufferSubSamplesSOFT not supported");
 }
@@ -1544,7 +1544,7 @@ AL_API void AL_APIENTRY alGetBufferSamplesSOFT(ALuint /*buffer*/, ALsizei /*offs
     ALsizei /*samples*/, ALenum /*channels*/, ALenum /*type*/, ALvoid* /*data*/) noexcept
 {
     ContextRef context{GetContextRef()};
-    if(!context) UNLIKELY return;
+    if(!context) [[unlikely]] return;
 
     context->setError(AL_INVALID_OPERATION, "alGetBufferSamplesSOFT not supported");
 }
@@ -1552,7 +1552,7 @@ AL_API void AL_APIENTRY alGetBufferSamplesSOFT(ALuint /*buffer*/, ALsizei /*offs
 AL_API ALboolean AL_APIENTRY alIsBufferFormatSupportedSOFT(ALenum /*format*/) noexcept
 {
     ContextRef context{GetContextRef()};
-    if(!context) UNLIKELY return AL_FALSE;
+    if(!context) [[unlikely]] return AL_FALSE;
 
     context->setError(AL_INVALID_OPERATION, "alIsBufferFormatSupportedSOFT not supported");
     return AL_FALSE;
@@ -1580,8 +1580,8 @@ BufferSubList::~BufferSubList()
     uint64_t usemask{~FreeMask};
     while(usemask)
     {
-        const int idx{al::countr_zero(usemask)};
-        std::destroy_at(al::to_address(Buffers->begin() + idx));
+        const int idx{std::countr_zero(usemask)};
+        std::destroy_at(std::to_address(Buffers->begin() + idx));
         usemask &= ~(1_u64 << idx);
     }
     FreeMask = ~usemask;
@@ -1646,7 +1646,7 @@ try {
 
     /* Validate the buffers. */
     std::unordered_set<ALbuffer*> buflist;
-    for(const ALuint bufid : al::span{buffers, static_cast<ALuint>(n)})
+    for(const ALuint bufid : std::span{buffers, static_cast<ALuint>(n)})
     {
         if(bufid == AL_NONE)
             continue;

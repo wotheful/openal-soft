@@ -26,6 +26,7 @@
 #include <jni.h>
 
 #include <array>
+#include <bit>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -33,9 +34,7 @@
 #include <thread>
 #include <functional>
 
-#include "albit.h"
 #include "alnumeric.h"
-#include "alsem.h"
 #include "alstring.h"
 #include "althrd_setname.h"
 #include "core/device.h"
@@ -141,7 +140,7 @@ constexpr SLuint32 GetTypeRepresentation(DevFmtType type) noexcept
 
 constexpr SLuint32 GetByteOrderEndianness() noexcept
 {
-    if(al::endian::native == al::endian::little)
+    if constexpr(std::endian::native == std::endian::little)
         return SL_BYTEORDER_LITTLEENDIAN;
     return SL_BYTEORDER_BIGENDIAN;
 }
@@ -182,7 +181,7 @@ constexpr const char *res_str(SLresult result) noexcept
 
 inline void PrintErr(SLresult res, const char *str)
 {
-    if(res != SL_RESULT_SUCCESS) UNLIKELY
+    if(res != SL_RESULT_SUCCESS) [[unlikely]]
         ERR("{}: {}", str, res_str(res));
 }
 
@@ -212,7 +211,7 @@ struct OpenSLPlayback final : public BackendBase {
     SLObjectItf mBufferQueueObj{nullptr};
 
     RingBufferPtr mRing{nullptr};
-    al::semaphore mSem;
+    std::atomic<bool> mSignal;
 
     std::mutex mMutex;
 
@@ -252,7 +251,8 @@ void OpenSLPlayback::process(SLAndroidSimpleBufferQueueItf) noexcept
      */
     mRing->readAdvance(1);
 
-    mSem.post();
+    mSignal.store(true, std::memory_order_release);
+    mSignal.notify_all();
 }
 
 int OpenSLPlayback::mixerProc()
@@ -298,7 +298,8 @@ int OpenSLPlayback::mixerProc()
 
             if(mRing->writeSpace() == 0)
             {
-                mSem.wait();
+                mSignal.wait(false, std::memory_order_acquire);
+                mSignal.store(false, std::memory_order_release);
                 continue;
             }
         }
@@ -549,7 +550,8 @@ void OpenSLPlayback::stop()
     if(mKillNow.exchange(true, std::memory_order_acq_rel) || !mThread.joinable())
         return;
 
-    mSem.post();
+    mSignal.store(true, std::memory_order_release);
+    mSignal.notify_all();
     mThread.join();
 
     SLPlayItf player;
@@ -878,12 +880,12 @@ void OpenSLCapture::captureSamples(std::byte *buffer, uint samples)
     }
 
     SLAndroidSimpleBufferQueueItf bufferQueue{};
-    if(mDevice->Connected.load(std::memory_order_acquire)) LIKELY
+    if(mDevice->Connected.load(std::memory_order_acquire)) [[likely]]
     {
         const SLresult result{VCALL(mRecordObj,GetInterface)(SL_IID_ANDROIDSIMPLEBUFFERQUEUE,
             &bufferQueue)};
         PrintErr(result, "recordObj->GetInterface");
-        if(SL_RESULT_SUCCESS != result) UNLIKELY
+        if(SL_RESULT_SUCCESS != result) [[unlikely]]
         {
             mDevice->handleDisconnect("Failed to get capture buffer queue: {:#08x}", result);
             bufferQueue = nullptr;
@@ -904,7 +906,7 @@ void OpenSLCapture::captureSamples(std::byte *buffer, uint samples)
 
     SLresult result{SL_RESULT_SUCCESS};
     auto wdata = mRing->getWriteVector();
-    if(adv_count > wdata[1].len) LIKELY
+    if(adv_count > wdata[1].len) [[likely]]
     {
         auto len1 = std::min(wdata[0].len, adv_count-wdata[1].len);
         auto buf1 = wdata[0].buf + chunk_size*(wdata[0].len-len1);

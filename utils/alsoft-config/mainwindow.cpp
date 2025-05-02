@@ -8,6 +8,7 @@
 #include <array>
 #include <cmath>
 #include <memory>
+#include <span>
 
 #include <QFileDialog>
 #include <QMessageBox>
@@ -23,7 +24,6 @@
 #endif
 
 #include "almalloc.h"
-#include "alspan.h"
 
 namespace {
 
@@ -99,6 +99,7 @@ constexpr std::array speakerModeList{
     NameValuePair{ "Ambisonic, 1st Order", "ambi1" },
     NameValuePair{ "Ambisonic, 2nd Order", "ambi2" },
     NameValuePair{ "Ambisonic, 3rd Order", "ambi3" },
+    NameValuePair{ "Ambisonic, 4th Order", "ambi4" },
 };
 constexpr std::array sampleTypeList{
     NameValuePair{ "Autodetect", "" },
@@ -120,6 +121,8 @@ constexpr std::array resamplerList{
     NameValuePair{ "11th order Sinc", "bsinc12" },
     NameValuePair{ "23rd order Sinc (fast)", "fast_bsinc24" },
     NameValuePair{ "23rd order Sinc", "bsinc24" },
+    NameValuePair{ "47th order Sinc (fast)", "fast_bsinc48" },
+    NameValuePair{ "47th order Sinc", "bsinc48" },
 };
 constexpr std::array stereoModeList{
     NameValuePair{ "Autodetect", "" },
@@ -147,7 +150,7 @@ constexpr std::array hrtfModeList{
     NameValuePair{ "Full", "full" },
 };
 
-constexpr auto GetDefaultIndex(const al::span<const NameValuePair> list) -> size_t
+constexpr auto GetDefaultIndex(const std::span<const NameValuePair> list) -> size_t
 {
     for(size_t i{0};i < list.size();++i)
     {
@@ -247,7 +250,7 @@ QStringList getAllDataPaths(const QString &append)
     return list;
 }
 
-QString getValueFromName(const al::span<const NameValuePair> list, const QString &str)
+QString getValueFromName(const std::span<const NameValuePair> list, const QString &str)
 {
     for(size_t i{0};i < list.size();++i)
     {
@@ -257,7 +260,7 @@ QString getValueFromName(const al::span<const NameValuePair> list, const QString
     return QString{};
 }
 
-QString getNameFromValue(const al::span<const NameValuePair> list, const QString &str)
+QString getNameFromValue(const std::span<const NameValuePair> list, const QString &str)
 {
     for(size_t i{0};i < list.size();++i)
     {

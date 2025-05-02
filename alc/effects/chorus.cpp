@@ -25,13 +25,13 @@
 #include <cmath>
 #include <cstdlib>
 #include <limits>
+#include <numbers>
+#include <span>
 #include <variant>
 #include <vector>
 
 #include "alc/effects/base.h"
-#include "alnumbers.h"
 #include "alnumeric.h"
-#include "alspan.h"
 #include "core/ambidefs.h"
 #include "core/bufferline.h"
 #include "core/context.h"
@@ -51,7 +51,7 @@ namespace {
 
 using uint = unsigned int;
 
-constexpr auto inv_sqrt2 = static_cast<float>(1.0 / al::numbers::sqrt2);
+constexpr auto inv_sqrt2 = static_cast<float>(1.0 / std::numbers::sqrt2);
 constexpr auto lcoeffs_pw = CalcDirectionCoeffs(std::array{-1.0f, 0.0f, 0.0f});
 constexpr auto rcoeffs_pw = CalcDirectionCoeffs(std::array{ 1.0f, 0.0f, 0.0f});
 constexpr auto lcoeffs_nrml = CalcDirectionCoeffs(std::array{-inv_sqrt2, 0.0f, inv_sqrt2});
@@ -97,8 +97,8 @@ struct ChorusState final : public EffectState {
     void deviceUpdate(const DeviceBase *device, const BufferStorage*) final;
     void update(const ContextBase *context, const EffectSlot *slot, const EffectProps *props_,
         const EffectTarget target) final;
-    void process(const size_t samplesToDo, const al::span<const FloatBufferLine> samplesIn,
-        const al::span<FloatBufferLine> samplesOut) final;
+    void process(const size_t samplesToDo, const std::span<const FloatBufferLine> samplesIn,
+        const std::span<FloatBufferLine> samplesOut) final;
 };
 
 
@@ -141,13 +141,13 @@ void ChorusState::update(const ContextBase *context, const EffectSlot *slot,
 
     /* Gains for left and right sides */
     const bool ispairwise{device->mRenderMode == RenderMode::Pairwise};
-    const auto lcoeffs = (!ispairwise) ? al::span{lcoeffs_nrml} : al::span{lcoeffs_pw};
-    const auto rcoeffs = (!ispairwise) ? al::span{rcoeffs_nrml} : al::span{rcoeffs_pw};
+    const auto lcoeffs = (!ispairwise) ? std::span{lcoeffs_nrml} : std::span{lcoeffs_pw};
+    const auto rcoeffs = (!ispairwise) ? std::span{rcoeffs_nrml} : std::span{rcoeffs_pw};
 
     /* Attenuate the outputs by -3dB, since we duplicate a single mono input to
      * separate left/right outputs.
      */
-    const auto gain = slot->Gain * (1.0f/al::numbers::sqrt2_v<float>);
+    const auto gain = slot->Gain * (1.0f/std::numbers::sqrt2_v<float>);
     mOutTarget = target.Main->Buffer;
     ComputePanGains(target.Main, lcoeffs, gain, mGains[0].Target);
     ComputePanGains(target.Main, rcoeffs, gain, mGains[1].Target);
@@ -176,7 +176,7 @@ void ChorusState::update(const ContextBase *context, const EffectSlot *slot,
             mLfoScale = 4.0f / static_cast<float>(mLfoRange);
             break;
         case ChorusWaveform::Sinusoid:
-            mLfoScale = al::numbers::pi_v<float>*2.0f / static_cast<float>(mLfoRange);
+            mLfoScale = std::numbers::pi_v<float>*2.0f / static_cast<float>(mLfoRange);
             break;
         }
 
@@ -262,9 +262,10 @@ void ChorusState::calcSinusoidDelays(const size_t todo)
     mLfoOffset = static_cast<uint>(mLfoOffset+todo) % lfo_range;
 }
 
-void ChorusState::process(const size_t samplesToDo, const al::span<const FloatBufferLine> samplesIn, const al::span<FloatBufferLine> samplesOut)
+void ChorusState::process(const size_t samplesToDo,
+    const std::span<const FloatBufferLine> samplesIn, const std::span<FloatBufferLine> samplesOut)
 {
-    const auto delaybuf = al::span{mDelayBuffer};
+    const auto delaybuf = std::span{mDelayBuffer};
     const size_t bufmask{delaybuf.size()-1};
     const float feedback{mFeedback};
     const uint avgdelay{(static_cast<uint>(mDelay) + MixerFracHalf) >> MixerFracBits};
@@ -275,10 +276,10 @@ void ChorusState::process(const size_t samplesToDo, const al::span<const FloatBu
     else /*if(mWaveform == ChorusWaveform::Triangle)*/
         calcTriangleDelays(samplesToDo);
 
-    const auto ldelays = al::span{mModDelays[0]};
-    const auto rdelays = al::span{mModDelays[1]};
-    const auto lbuffer = al::span{mBuffer[0]};
-    const auto rbuffer = al::span{mBuffer[1]};
+    const auto ldelays = std::span{mModDelays[0]};
+    const auto rdelays = std::span{mModDelays[1]};
+    const auto lbuffer = std::span{mBuffer[0]};
+    const auto rbuffer = std::span{mBuffer[1]};
     for(size_t i{0u};i < samplesToDo;++i)
     {
         // Feed the buffer's input first (necessary for delays < 1).

@@ -4,23 +4,23 @@
 #include "helpers.h"
 
 #if defined(_WIN32)
-#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #endif
 
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
 
 #include "almalloc.h"
 #include "alnumeric.h"
-#include "alspan.h"
 #include "alstring.h"
 #include "filesystem.h"
 #include "logging.h"
@@ -61,7 +61,7 @@ void DirectorySearch(const fs::path &path, const std::string_view ext,
         ERR("Exception enumerating files: {}", e.what());
     }
 
-    const auto newlist = al::span{*results}.subspan(base);
+    const auto newlist = std::span{*results}.subspan(base);
     std::sort(newlist.begin(), newlist.end());
     for(const auto &name : newlist)
         TRACE(" got {}", name);
@@ -76,7 +76,7 @@ void DirectorySearch(const fs::path &path, const std::string_view ext,
 
 const PathNamePair &GetProcBinary()
 {
-    auto get_procbin = []
+    static const auto procbin = std::invoke([]() -> PathNamePair
     {
 #if !ALSOFT_UWP
         DWORD pathlen{256};
@@ -102,6 +102,12 @@ const PathNamePair &GetProcBinary()
 
         fullpath.resize(len);
 #else
+        if(__argc < 1 || !__wargv)
+        {
+            ERR("Failed to get process name: __argc = {}, __wargv = {}", __argc,
+                static_cast<void*>(__wargv));
+            return PathNamePair{};
+        }
         const WCHAR *exePath{__wargv[0]};
         if(!exePath)
         {
@@ -123,8 +129,7 @@ const PathNamePair &GetProcBinary()
 
         TRACE("Got binary: {}, {}", res.path, res.fname);
         return res;
-    };
-    static const PathNamePair procbin{get_procbin()};
+    });
     return procbin;
 }
 
@@ -159,7 +164,7 @@ auto SearchDataFiles(const std::string_view ext, const std::string_view subdir)
 
     /* If the path is absolute, use it directly. */
     std::vector<std::string> results;
-    auto path = fs::u8path(subdir);
+    auto path = fs::path(al::char_as_u8(subdir));
     if(path.is_absolute())
     {
         DirectorySearch(path, ext, &results);
@@ -224,7 +229,7 @@ void SetRTPriority()
 
 const PathNamePair &GetProcBinary()
 {
-    auto get_procbin = []
+    static const auto procbin = std::invoke([]() -> PathNamePair
     {
         std::string pathname;
 #ifdef __FreeBSD__
@@ -299,8 +304,7 @@ const PathNamePair &GetProcBinary()
 
         TRACE("Got binary: \"{}\", \"{}\"", res.path, res.fname);
         return res;
-    };
-    static const PathNamePair procbin{get_procbin()};
+    });
     return procbin;
 }
 
@@ -324,7 +328,7 @@ auto SearchDataFiles(const std::string_view ext, const std::string_view subdir)
     std::lock_guard<std::mutex> srchlock{gSearchLock};
 
     std::vector<std::string> results;
-    auto path = fs::u8path(subdir);
+    auto path = fs::path(al::char_as_u8(subdir));
     if(path.is_absolute())
     {
         DirectorySearch(path, ext, &results);

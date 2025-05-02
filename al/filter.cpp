@@ -23,6 +23,7 @@
 #include "filter.h"
 
 #include <algorithm>
+#include <bit>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
@@ -30,6 +31,7 @@
 #include <memory>
 #include <mutex>
 #include <numeric>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
@@ -37,12 +39,10 @@
 #include "AL/alc.h"
 #include "AL/efx.h"
 
-#include "albit.h"
 #include "alc/context.h"
 #include "alc/device.h"
 #include "almalloc.h"
 #include "alnumeric.h"
-#include "alspan.h"
 #include "core/except.h"
 #include "core/logging.h"
 #include "direct_defs.h"
@@ -101,11 +101,11 @@ auto EnsureFilters(al::Device *device, size_t needed) noexcept -> bool
 try {
     size_t count{std::accumulate(device->FilterList.cbegin(), device->FilterList.cend(), 0_uz,
         [](size_t cur, const FilterSubList &sublist) noexcept -> size_t
-        { return cur + static_cast<ALuint>(al::popcount(sublist.FreeMask)); })};
+        { return cur + static_cast<ALuint>(std::popcount(sublist.FreeMask)); })};
 
     while(needed > count)
     {
-        if(device->FilterList.size() >= 1<<25) UNLIKELY
+        if(device->FilterList.size() >= 1<<25) [[unlikely]]
             return false;
 
         FilterSubList sublist{};
@@ -128,10 +128,10 @@ auto AllocFilter(al::Device *device) noexcept -> ALfilter*
         [](const FilterSubList &entry) noexcept -> bool
         { return entry.FreeMask != 0; });
     auto lidx = static_cast<ALuint>(std::distance(device->FilterList.begin(), sublist));
-    auto slidx = static_cast<ALuint>(al::countr_zero(sublist->FreeMask));
+    auto slidx = static_cast<ALuint>(std::countr_zero(sublist->FreeMask));
     ASSUME(slidx < 64);
 
-    ALfilter *filter{al::construct_at(al::to_address(sublist->Filters->begin() + slidx))};
+    ALfilter *filter{std::construct_at(std::to_address(sublist->Filters->begin() + slidx))};
     InitFilterParams(filter, AL_FILTER_NULL);
 
     /* Add 1 to avoid filter ID 0. */
@@ -162,12 +162,12 @@ auto LookupFilter(al::Device *device, ALuint id) noexcept -> ALfilter*
     const size_t lidx{(id-1) >> 6};
     const ALuint slidx{(id-1) & 0x3f};
 
-    if(lidx >= device->FilterList.size()) UNLIKELY
+    if(lidx >= device->FilterList.size()) [[unlikely]]
         return nullptr;
     FilterSubList &sublist = device->FilterList[lidx];
-    if(sublist.FreeMask & (1_u64 << slidx)) UNLIKELY
+    if(sublist.FreeMask & (1_u64 << slidx)) [[unlikely]]
         return nullptr;
-    return al::to_address(sublist.Filters->begin() + slidx);
+    return std::to_address(sublist.Filters->begin() + slidx);
 }
 
 } // namespace
@@ -364,12 +364,12 @@ FORCE_ALIGN void AL_APIENTRY alGenFiltersDirect(ALCcontext *context, ALsizei n, 
 try {
     if(n < 0)
         context->throw_error(AL_INVALID_VALUE, "Generating {} filters", n);
-    if(n <= 0) UNLIKELY return;
+    if(n <= 0) [[unlikely]] return;
 
     auto *device = context->mALDevice.get();
     auto filterlock = std::lock_guard{device->FilterLock};
 
-    const al::span fids{filters, static_cast<ALuint>(n)};
+    const auto fids = std::span{filters, static_cast<ALuint>(n)};
     if(!EnsureFilters(device, fids.size()))
         context->throw_error(AL_OUT_OF_MEMORY, "Failed to allocate {} filter{}", n,
             (n==1) ? "" : "s");
@@ -388,7 +388,7 @@ FORCE_ALIGN void AL_APIENTRY alDeleteFiltersDirect(ALCcontext *context, ALsizei 
 try {
     if(n < 0)
         context->throw_error(AL_INVALID_VALUE, "Deleting {} filters", n);
-    if(n <= 0) UNLIKELY return;
+    if(n <= 0) [[unlikely]] return;
 
     auto *device = context->mALDevice.get();
     auto filterlock = std::lock_guard{device->FilterLock};
@@ -397,7 +397,7 @@ try {
     auto validate_filter = [device](const ALuint fid) -> bool
     { return !fid || LookupFilter(device, fid) != nullptr; };
 
-    const al::span fids{filters, static_cast<ALuint>(n)};
+    const auto fids = std::span{filters, static_cast<ALuint>(n)};
     auto invflt = std::find_if_not(fids.begin(), fids.end(), validate_filter);
     if(invflt != fids.end())
         context->throw_error(AL_INVALID_NAME, "Invalid filter ID {}", *invflt);
@@ -647,8 +647,8 @@ FilterSubList::~FilterSubList()
     uint64_t usemask{~FreeMask};
     while(usemask)
     {
-        const int idx{al::countr_zero(usemask)};
-        std::destroy_at(al::to_address(Filters->begin() + idx));
+        const int idx{std::countr_zero(usemask)};
+        std::destroy_at(std::to_address(Filters->begin() + idx));
         usemask &= ~(1_u64 << idx);
     }
     FreeMask = ~usemask;

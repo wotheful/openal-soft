@@ -26,6 +26,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cassert>
 #include <cerrno>
 #include <complex>
@@ -33,16 +34,15 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <numbers>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <utility>
 #include <vector>
 
-#include "albit.h"
 #include "almalloc.h"
-#include "alnumbers.h"
-#include "alspan.h"
 #include "fmt/core.h"
 #include "vector.h"
 #include "opthelpers.h"
@@ -94,8 +94,8 @@ void fwrite32le(uint val, FILE *f)
 
 byte4 f32AsLEBytes(const float value)
 {
-    auto ret = al::bit_cast<byte4>(value);
-    if constexpr(al::endian::native == al::endian::big)
+    auto ret = std::bit_cast<byte4>(value);
+    if constexpr(std::endian::native == std::endian::big)
     {
         std::swap(ret[0], ret[3]);
         std::swap(ret[1], ret[2]);
@@ -107,7 +107,7 @@ byte4 f32AsLEBytes(const float value)
 constexpr uint BufferLineSize{1024};
 
 using FloatBufferLine = std::array<float,BufferLineSize>;
-using FloatBufferSpan = al::span<float,BufferLineSize>;
+using FloatBufferSpan = std::span<float,BufferLineSize>;
 
 
 struct UhjDecoder {
@@ -124,10 +124,10 @@ struct UhjDecoder {
 
     alignas(16) std::array<float,BufferLineSize + sFilterDelay*2> mTemp{};
 
-    void decode(const al::span<const float> InSamples, const std::size_t InChannels,
-        const al::span<FloatBufferLine> OutSamples, const std::size_t SamplesToDo);
-    void decode2(const al::span<const float> InSamples, const al::span<FloatBufferLine> OutSamples,
-        const std::size_t SamplesToDo);
+    void decode(const std::span<const float> InSamples, const std::size_t InChannels,
+        const std::span<FloatBufferLine> OutSamples, const std::size_t SamplesToDo);
+    void decode2(const std::span<const float> InSamples,
+        const std::span<FloatBufferLine> OutSamples, const std::size_t SamplesToDo);
 };
 
 const PhaseShifterT<UhjDecoder::sFilterDelay*2> PShift{};
@@ -206,14 +206,14 @@ const PhaseShifterT<UhjDecoder::sFilterDelay*2> PShift{};
  *
  * Not halving produces a result matching the original input.
  */
-void UhjDecoder::decode(const al::span<const float> InSamples, const std::size_t InChannels,
-    const al::span<FloatBufferLine> OutSamples, const std::size_t SamplesToDo)
+void UhjDecoder::decode(const std::span<const float> InSamples, const std::size_t InChannels,
+    const std::span<FloatBufferLine> OutSamples, const std::size_t SamplesToDo)
 {
     ASSUME(SamplesToDo > 0);
 
-    auto woutput = al::span{OutSamples[0]};
-    auto xoutput = al::span{OutSamples[1]};
-    auto youtput = al::span{OutSamples[2]};
+    auto woutput = std::span{OutSamples[0]};
+    auto xoutput = std::span{OutSamples[1]};
+    auto youtput = std::span{OutSamples[2]};
 
     /* Add a delay to the input channels, to align it with the all-passed
      * signal.
@@ -269,7 +269,7 @@ void UhjDecoder::decode(const al::span<const float> InSamples, const std::size_t
 
     if(OutSamples.size() > 3)
     {
-        auto zoutput = al::span{OutSamples[3]};
+        auto zoutput = std::span{OutSamples[3]};
         /* Z = 1.023332*Q */
         for(std::size_t i{0};i < SamplesToDo;++i)
             zoutput[i] = 1.023332f*mQ[i];
@@ -300,14 +300,14 @@ void UhjDecoder::decode(const al::span<const float> InSamples, const std::size_t
  * NOTE: As above, S and D should not be halved. The only consequence of
  * halving here is merely a -6dB reduction in output, but it's still incorrect.
  */
-void UhjDecoder::decode2(const al::span<const float> InSamples,
-    const al::span<FloatBufferLine> OutSamples, const std::size_t SamplesToDo)
+void UhjDecoder::decode2(const std::span<const float> InSamples,
+    const std::span<FloatBufferLine> OutSamples, const std::size_t SamplesToDo)
 {
     ASSUME(SamplesToDo > 0);
 
-    auto woutput = al::span{OutSamples[0]};
-    auto xoutput = al::span{OutSamples[1]};
-    auto youtput = al::span{OutSamples[2]};
+    auto woutput = std::span{OutSamples[0]};
+    auto xoutput = std::span{OutSamples[1]};
+    auto youtput = std::span{OutSamples[2]};
 
     /* S = Left + Right */
     for(std::size_t i{0};i < SamplesToDo;++i)
@@ -348,7 +348,7 @@ void UhjDecoder::decode2(const al::span<const float> InSamples,
 }
 
 
-int main(al::span<std::string_view> args)
+int main(std::span<std::string_view> args)
 {
     if(args.size() < 2 || args[1] == "-h" || args[1] == "--help")
     {
@@ -499,7 +499,7 @@ int main(al::span<std::string_view> args)
             for(std::size_t i{0};i < got;++i)
             {
                 /* Attenuate by -3dB for FuMa output levels. */
-                constexpr auto inv_sqrt2 = static_cast<float>(1.0/al::numbers::sqrt2);
+                static constexpr auto inv_sqrt2 = static_cast<float>(1.0/std::numbers::sqrt2);
                 for(std::size_t j{0};j < outchans;++j)
                     outmem[i*outchans + j] = f32AsLEBytes(decmem[j][LeadIn+i] * inv_sqrt2);
             }
@@ -542,5 +542,5 @@ int main(int argc, char **argv)
     assert(argc >= 0);
     auto args = std::vector<std::string_view>(static_cast<unsigned int>(argc));
     std::copy_n(argv, args.size(), args.begin());
-    return main(al::span{args});
+    return main(std::span{args});
 }

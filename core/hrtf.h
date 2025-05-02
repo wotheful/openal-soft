@@ -5,12 +5,12 @@
 #include <cstddef>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "almalloc.h"
-#include "alspan.h"
 #include "ambidefs.h"
 #include "bufferline.h"
 #include "flexarray.h"
@@ -19,7 +19,7 @@
 
 
 struct alignas(16) HrtfStore {
-    std::atomic<uint> mRef{};
+    std::atomic<uint> mRef;
 
     uint mSampleRate : 24;
     uint mIrSize : 8;
@@ -31,18 +31,18 @@ struct alignas(16) HrtfStore {
     /* NOTE: Fields are stored *backwards*. field[0] is the farthest field, and
      * field[fdCount-1] is the nearest.
      */
-    al::span<const Field> mFields;
+    std::span<const Field> mFields;
 
     struct Elevation {
         ushort azCount;
         ushort irOffset;
     };
-    al::span<Elevation> mElev;
-    al::span<const HrirArray> mCoeffs;
-    al::span<const ubyte2> mDelays;
+    std::span<Elevation> mElev;
+    std::span<const HrirArray> mCoeffs;
+    std::span<const ubyte2> mDelays;
 
     void getCoeffs(float elevation, float azimuth, float distance, float spread,
-        const HrirSpan coeffs, const al::span<uint,2> delays) const;
+        const HrirSpan coeffs, const std::span<uint,2> delays) const;
 
     void add_ref();
     void dec_ref();
@@ -82,9 +82,9 @@ struct DirectHrtfState {
      * are ordered and scaled according to the matrix input.
      */
     void build(const HrtfStore *Hrtf, const uint irSize, const bool perHrirMin,
-        const al::span<const AngularPoint> AmbiPoints,
-        const al::span<const std::array<float,MaxAmbiChannels>> AmbiMatrix,
-        const float XOverFreq, const al::span<const float,MaxAmbiOrder+1> AmbiOrderHFGain);
+        const std::span<const AngularPoint> AmbiPoints,
+        const std::span<const std::array<float,MaxAmbiChannels>> AmbiMatrix,
+        const float XOverFreq, const std::span<const float,MaxAmbiOrder+1> AmbiOrderHFGain);
 
     static std::unique_ptr<DirectHrtfState> Create(size_t num_chans);
 
