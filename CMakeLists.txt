@@ -1,7 +1,13 @@
 # CMake build file list for OpenAL
 
 cmake_minimum_required(VERSION 3.13)
-enable_testing()
+
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -pipe -integrated-as -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-invariant-load-hoisting -mllvm -polly-run-inliner -mllvm -polly-run-dce -mllvm -polly-invariant-load-hoisting -flto=thin -mllvm -polly-run-inliner -mllvm -polly-run-dce -mllvm -polly-parallel -mllvm -polly-scheduling=dynamic -flto=thin -fno-emulated-tls -fwhole-program-vtables -fdata-sections -ffunction-sections -fmerge-all-constants -mllvm -polly-detect-keep-going -mllvm -polly-ast-use-context -march=armv8-a+simd -fPIC -DPIC -ferror-limit=0 -Wno-return-type -Wno-unused-parameter -Wno-c++98-compat -Wno-c++98-compat-pedantic")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -pipe -integrated-as -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-invariant-load-hoisting -mllvm -polly-run-inliner -mllvm -polly-run-dce -mllvm -polly-invariant-load-hoisting -flto=thin -mllvm -polly-run-inliner -mllvm -polly-run-dce -mllvm -polly-parallel -mllvm -polly-scheduling=dynamic -flto=thin -fno-emulated-tls -fwhole-program-vtables -fdata-sections -ffunction-sections -fmerge-all-constants -mllvm -polly-detect-keep-going -mllvm -polly-ast-use-context -march=armv8-a+simd -fPIC -DPIC -ferror-limit=0 -Wno-return-type -Wno-unused-parameter -Wno-c++98-compat -Wno-c++98-compat-pedantic")
+set(LINK_OPTIONS "${CMAKE_LINK_OPTIONS} -fuse-ld=lld -flto=thin -Wl,-plugin-opt=-emulated-tls=0")
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_LINK_OPTIONS} -fuse-ld=lld -flto=thin -Wl,-plugin-opt=-emulated-tls=0")
+set(CMAKE_ANDROID_STL_TYPE system)
+set(CMAKE_ANDROID_LD "lld")
 
 if(APPLE)
     # The workaround for try_compile failing with code signing
@@ -104,23 +110,23 @@ include(GNUInstallDirs)
 find_package(PkgConfig)
 find_package(SDL3 QUIET)
 
-option(ALSOFT_DLOPEN  "Check for the dlopen API for loading optional libs"  ON)
+option(ALSOFT_DLOPEN  "Check for the dlopen API for loading optional libs"  OFF)
 
 option(ALSOFT_WERROR  "Treat compile warnings as errors"      OFF)
 
-option(ALSOFT_UTILS "Build utility programs"  ON)
+option(ALSOFT_UTILS "Build utility programs"  OFF)
 option(ALSOFT_NO_CONFIG_UTIL "Disable building the alsoft-config utility" OFF)
 
-option(ALSOFT_EXAMPLES  "Build example programs"  ON)
+option(ALSOFT_EXAMPLES  "Build example programs"  OFF)
 option(ALSOFT_TESTS "Build test programs"  OFF)
 
-option(ALSOFT_INSTALL "Install main library" ON)
-option(ALSOFT_INSTALL_CONFIG "Install alsoft.conf sample configuration file" ON)
-option(ALSOFT_INSTALL_HRTF_DATA "Install HRTF data files" ON)
-option(ALSOFT_INSTALL_AMBDEC_PRESETS "Install AmbDec preset files" ON)
-option(ALSOFT_INSTALL_EXAMPLES "Install example programs (alplay, alstream, ...)" ON)
-option(ALSOFT_INSTALL_UTILS "Install utility programs (openal-info, alsoft-config, ...)" ON)
-option(ALSOFT_UPDATE_BUILD_VERSION "Update git build version info" ON)
+option(ALSOFT_INSTALL "Install main library" OFF)
+option(ALSOFT_INSTALL_CONFIG "Install alsoft.conf sample configuration file" OFF)
+option(ALSOFT_INSTALL_HRTF_DATA "Install HRTF data files" OFF)
+option(ALSOFT_INSTALL_AMBDEC_PRESETS "Install AmbDec preset files" OFF)
+option(ALSOFT_INSTALL_EXAMPLES "Install example programs (alplay, alstream, ...)" OFF)
+option(ALSOFT_INSTALL_UTILS "Install utility programs (openal-info, alsoft-config, ...)" OFF)
+option(ALSOFT_UPDATE_BUILD_VERSION "Update git build version info" OFF)
 
 option(ALSOFT_EAX "Enable legacy EAX extensions" ${WIN32})
 
@@ -601,99 +607,63 @@ endif()
 # router, and certain tools and examples.
 set(COMMON_OBJS
     common/albit.h
-    common/alcomplex.cpp
     common/alcomplex.h
     common/almalloc.h
     common/alnumeric.h
-    common/alstring.cpp
     common/alstring.h
-    common/althrd_setname.cpp
     common/althrd_setname.h
     common/althreads.h
     common/atomic.h
     common/comptr.h
-    common/dynload.cpp
     common/dynload.h
-    common/filesystem.cpp
     common/filesystem.h
     common/flexarray.h
     common/intrusive_ptr.h
     common/opthelpers.h
-    common/pffft.cpp
     common/pffft.h
     common/phase_shifter.h
-    common/polyphase_resampler.cpp
     common/polyphase_resampler.h
     common/pragmadefs.h
-    common/ringbuffer.cpp
     common/ringbuffer.h
-    common/strutils.cpp
     common/strutils.h
     common/vecmat.h
     common/vector.h)
 
 # Core library routines
 set(CORE_OBJS
-    core/ambdec.cpp
     core/ambdec.h
-    core/ambidefs.cpp
     core/ambidefs.h
     core/async_event.h
-    core/bformatdec.cpp
     core/bformatdec.h
-    core/bs2b.cpp
     core/bs2b.h
     core/bsinc_defs.h
-    core/bsinc_tables.cpp
     core/bsinc_tables.h
     core/bufferline.h
-    core/buffer_storage.cpp
     core/buffer_storage.h
-    core/context.cpp
     core/context.h
-    core/converter.cpp
     core/converter.h
-    core/cpu_caps.cpp
     core/cpu_caps.h
     core/cubic_defs.h
-    core/cubic_tables.cpp
     core/cubic_tables.h
-    core/devformat.cpp
     core/devformat.h
-    core/device.cpp
     core/device.h
     core/effects/base.h
-    core/effectslot.cpp
     core/effectslot.h
-    core/except.cpp
     core/except.h
     core/filters/biquad.h
-    core/filters/biquad.cpp
-    core/filters/nfc.cpp
     core/filters/nfc.h
-    core/filters/splitter.cpp
     core/filters/splitter.h
     core/fmt_traits.h
-    core/fpu_ctrl.cpp
     core/fpu_ctrl.h
     core/front_stablizer.h
-    core/helpers.cpp
     core/helpers.h
-    core/hrtf.cpp
     core/hrtf.h
-    core/logging.cpp
     core/logging.h
-    core/mastering.cpp
     core/mastering.h
-    core/mixer.cpp
     core/mixer.h
     core/resampler_limits.h
-    core/storage_formats.cpp
     core/storage_formats.h
-    core/uhjfilter.cpp
     core/uhjfilter.h
-    core/uiddefs.cpp
-    core/voice.cpp
     core/voice.h
     core/voice_change.h)
 
@@ -743,8 +713,7 @@ endif()
 set(CORE_OBJS ${CORE_OBJS}
     core/mixer/defs.h
     core/mixer/hrtfbase.h
-    core/mixer/hrtfdefs.h
-    core/mixer/mixer_c.cpp)
+    core/mixer/hrtfdefs.h)
 
 # AL and related routines
 set(OPENAL_OBJS
@@ -752,7 +721,6 @@ set(OPENAL_OBJS
     al/auxeffectslot.h
     al/buffer.cpp
     al/buffer.h
-    al/debug.cpp
     al/debug.h
     al/direct_defs.h
     al/effect.cpp
@@ -873,8 +841,8 @@ set(HAVE_WINMM      0)
 set(HAVE_PORTAUDIO  0)
 set(HAVE_PULSEAUDIO 0)
 set(HAVE_COREAUDIO  0)
-set(HAVE_OPENSL     0)
-set(HAVE_OBOE       0)
+set(HAVE_OPENSL     1)
+set(HAVE_OBOE       1)
 set(HAVE_OTHERIO    0)
 set(HAVE_WAVE       0)
 set(HAVE_SDL2       0)
