@@ -1,7 +1,7 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#define FORCE_ALIGN @ALSOFT_FORCE_ALIGN@
+#define FORCE_ALIGN __attribute__((force_align_arg_pointer))
 
 #define HAVE_PROC_PIDPATH
 #define HAVE_PTHREAD_SETSCHEDPARAM
