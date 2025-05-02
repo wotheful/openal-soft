@@ -105,7 +105,10 @@ add_library(${CMAKE_PROJECT_NAME} SHARED
     alc/events.cpp
     alc/panning.cpp)
 
-target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
+target_link_libraries(${CMAKE_PROJECT_NAME}
+        OpenSLES)
+
+target_include_directories(openal PUBLIC
         ./
         ./include
         ./include/AL
@@ -114,9 +117,3 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
         ./common
         ./core
         ./fmt-11.1.4/include)
-
-target_link_libraries(${CMAKE_PROJECT_NAME}
-        OpenSLES)
-
-target_include_directories(openal PUBLIC
-        ${CMAKE_SOURCE_DIR}/include)
