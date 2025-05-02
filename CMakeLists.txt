@@ -69,7 +69,6 @@ add_library(${CMAKE_PROJECT_NAME} SHARED
     alc/backends/base.cpp
     alc/backends/loopback.cpp
     alc/backends/null.cpp
-    alc/backends/oboe.cpp
     alc/backends/opensl.cpp
     alc/events.cpp
     alc/panning.cpp)
