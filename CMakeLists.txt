@@ -631,39 +631,66 @@ set(COMMON_OBJS
 
 # Core library routines
 set(CORE_OBJS
+    core/ambdec.cpp
     core/ambdec.h
+    core/ambidefs.cpp
     core/ambidefs.h
     core/async_event.h
+    core/bformatdec.cpp
     core/bformatdec.h
+    core/bs2b.cpp
     core/bs2b.h
     core/bsinc_defs.h
+    core/bsinc_tables.cpp
     core/bsinc_tables.h
     core/bufferline.h
+    core/buffer_storage.cpp
     core/buffer_storage.h
+    core/context.cpp
     core/context.h
+    core/converter.cpp
     core/converter.h
+    core/cpu_caps.cpp
     core/cpu_caps.h
     core/cubic_defs.h
+    core/cubic_tables.cpp
     core/cubic_tables.h
+    core/devformat.cpp
     core/devformat.h
+    core/device.cpp
     core/device.h
     core/effects/base.h
+    core/effectslot.cpp
     core/effectslot.h
+    core/except.cpp
     core/except.h
     core/filters/biquad.h
+    core/filters/biquad.cpp
+    core/filters/nfc.cpp
     core/filters/nfc.h
+    core/filters/splitter.cpp
     core/filters/splitter.h
     core/fmt_traits.h
+    core/fpu_ctrl.cpp
     core/fpu_ctrl.h
     core/front_stablizer.h
+    core/helpers.cpp
     core/helpers.h
+    core/hrtf.cpp
     core/hrtf.h
+    core/logging.cpp
     core/logging.h
+    core/mastering.cpp
     core/mastering.h
+    core/mixer.cpp
     core/mixer.h
     core/resampler_limits.h
+    core/storage_formats.cpp
     core/storage_formats.h
+    core/uhjfilter.cpp
     core/uhjfilter.h
+    core/uiddefs.cpp
+    core/voice.cpp
     core/voice.h
     core/voice_change.h)
 
@@ -713,7 +740,8 @@ endif()
 set(CORE_OBJS ${CORE_OBJS}
     core/mixer/defs.h
     core/mixer/hrtfbase.h
-    core/mixer/hrtfdefs.h)
+    core/mixer/hrtfdefs.h
+    core/mixer/mixer_c.cpp)
 
 # AL and related routines
 set(OPENAL_OBJS
