@@ -54,36 +54,30 @@ endif(COMMAND CMAKE_POLICY)
 
 add_library(${CMAKE_PROJECT_NAME} SHARED
     al/auxeffectslot.cpp
+    al/auxeffectslot.h
     al/buffer.cpp
-    al/debug.cpp
+    al/buffer.h
     al/effect.cpp
-    al/effects/autowah.cpp
-    al/effects/chorus.cpp
-    al/effects/compressor.cpp
-    al/effects/convolution.cpp
-    al/effects/dedicated.cpp
-    al/effects/distortion.cpp
-    al/effects/echo.cpp
-    al/effects/effects.cpp
-    al/effects/equalizer.cpp
-    al/effects/fshifter.cpp
-    al/effects/modulator.cpp
-    al/effects/null.cpp
-    al/effects/pshifter.cpp
-    al/effects/reverb.cpp
-    al/effects/vmorpher.cpp
+    al/effect.h
     al/error.cpp
     al/event.cpp
+    al/event.h
     al/extension.cpp
     al/filter.cpp
+    al/filter.h
     al/listener.cpp
+    al/listener.h
     al/source.cpp
+    al/source.h
     al/state.cpp
     alc/alc.cpp
     alc/alu.cpp
+    alc/alu.h
     alc/alconfig.cpp
-    alc/context.cpp
+    alc/alconfig.h
     alc/device.cpp
+    alc/device.h
+    alc/effects/base.h
     alc/effects/autowah.cpp
     alc/effects/chorus.cpp
     alc/effects/compressor.cpp
@@ -98,22 +92,23 @@ add_library(${CMAKE_PROJECT_NAME} SHARED
     alc/effects/pshifter.cpp
     alc/effects/reverb.cpp
     alc/effects/vmorpher.cpp
-    alc/backends/base.cpp
-    alc/backends/loopback.cpp
-    alc/backends/null.cpp
+    alc/export_list.h
+    alc/inprogext.h
+    alc/panning.cpp
     alc/backends/opensl.cpp
-    alc/events.cpp
-    alc/panning.cpp)
+    alc/backends/opensl.h)
 
 target_link_libraries(${CMAKE_PROJECT_NAME}
         OpenSLES)
 
-target_include_directories(openal PUBLIC
-        ./
-        ./include
-        ./include/AL
-        ./al
-        ./alc
-        ./common
-        ./core
-        ./fmt-11.1.4/include)
+target_include_directories(openal PRIVATE
+         ${CMAKE_CURRENT_SOURCE_DIR}
+         ${CMAKE_CURRENT_SOURCE_DIR}/include
+         ${CMAKE_CURRENT_SOURCE_DIR}/include/AL
+         ${CMAKE_CURRENT_SOURCE_DIR}/al
+         ${CMAKE_CURRENT_SOURCE_DIR}/alc
+         ${CMAKE_CURRENT_SOURCE_DIR}/common
+         ${CMAKE_CURRENT_SOURCE_DIR}/core)
+
+target_include_directories(openal INTERFACE
+         ${CMAKE_CURRENT_SOURCE_DIR}/include)
