@@ -1,3 +1,6 @@
+#ifndef CONFIG_H
+#define CONFIG_H
+
 #define HAVE_CPUID_INTRINSIC 1
 #define HAVE_PTHREAD_SETSCHEDPARAM 1
 #define HAVE_PTHREAD_SETNAME_NP 1
@@ -7,3 +10,5 @@
 #define HAVE_INTRIN_H 1
 #define HAVE_PTHREAD_NP_H 1
 #define HAVE_DLFCN_H 1
+
+#endif
