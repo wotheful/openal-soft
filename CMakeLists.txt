@@ -110,9 +110,9 @@ include(GNUInstallDirs)
 find_package(PkgConfig)
 find_package(SDL3 QUIET)
 
-option(ALSOFT_DLOPEN  "Check for the dlopen API for loading optional libs"  OFF)
+option(ALSOFT_DLOPEN  "Check for the dlopen API for loading optional libs"  ON)
 
-option(ALSOFT_WERROR  "Treat compile warnings as errors"      OFF)
+option(ALSOFT_WERROR  "Treat compile warnings as errors"      ON)
 
 option(ALSOFT_UTILS "Build utility programs"  OFF)
 option(ALSOFT_NO_CONFIG_UTIL "Disable building the alsoft-config utility" OFF)
@@ -120,7 +120,7 @@ option(ALSOFT_NO_CONFIG_UTIL "Disable building the alsoft-config utility" OFF)
 option(ALSOFT_EXAMPLES  "Build example programs"  OFF)
 option(ALSOFT_TESTS "Build test programs"  OFF)
 
-option(ALSOFT_INSTALL "Install main library" OFF)
+option(ALSOFT_INSTALL "Install main library" ON)
 option(ALSOFT_INSTALL_CONFIG "Install alsoft.conf sample configuration file" OFF)
 option(ALSOFT_INSTALL_HRTF_DATA "Install HRTF data files" OFF)
 option(ALSOFT_INSTALL_AMBDEC_PRESETS "Install AmbDec preset files" OFF)
@@ -758,6 +758,7 @@ set(OPENAL_OBJS
     al/auxeffectslot.h
     al/buffer.cpp
     al/buffer.h
+    al/debug.cpp
     al/debug.h
     al/direct_defs.h
     al/effect.cpp
