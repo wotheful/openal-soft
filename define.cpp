@@ -4,7 +4,6 @@
 
 #include "alc/context.h"
 #include "alstring.h"
-#include "direct_defs.h"
 
 ALboolean AL_APIENTRY alIsExtensionPresentDirect(ALCcontext *context, const ALchar *extName);
 ALvoid* AL_APIENTRY alGetProcAddressDirect(ALCcontext*, const ALchar *funcName);
