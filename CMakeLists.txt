@@ -640,6 +640,7 @@ set(COMMON_OBJS
 
 # Core library routines
 set(CORE_OBJS
+    define.cpp
     core/ambdec.cpp
     core/ambdec.h
     core/ambidefs.cpp
